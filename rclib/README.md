@@ -20,14 +20,36 @@ Multi-step operations defined in YAML with job scheduling, polling, and response
 ### 3. **Custom Handler Commands**
 Commands that require imperative logic implemented in the client application. Perfect for interactive operations, streaming responses, or complex business logic that cannot be expressed declaratively.
 
-The library transforms YAML mapping files into fully functional CLI applications by:
-1. **Dynamic Command Structure**: Commands are defined in YAML, not hardcoded
-2. **Argument Inheritance**: Common arguments can be shared across command groups
-3. **Template Substitution**: URL paths and request bodies support variable substitution
-4. **Conditional Overrides**: Arguments can override request parameters when explicitly provided
-5. **File Override Support**: Arguments can read content from files to replace other variables
-6. **Scenario Support**: Multi-step operations with job scheduling and polling
-7. **Custom Handler Support**: Integration points for imperative logic while preserving declarative argument definitions
+See Implemented Capabilities below for a concise list of features.
+
+## Implemented Capabilities
+
+- **Dynamic CLI from YAML**: Command tree, arguments, and help are generated from `mapping.yaml`.
+- **Three command types**:
+  - Single API calls (direct HTTP requests)
+  - Declarative scenarios (multi-step with job scheduling + polling)
+  - Custom handlers (imperative Rust code with validated variables)
+- **Argument model**:
+  - Inheritance and overrides (group/common args → command args)
+  - Boolean flags with conditional values
+  - File arguments that can override other variables (file content replacement)
+- **Templating**: Substitute variables in endpoints, bodies, and headers (including built-ins like `{uuid}`).
+- **HTTP features**:
+  - Blocking client with `reqwest`
+  - Headers and JSON bodies
+  - Multipart file uploads
+  - Base URL from OpenAPI `servers[0]` (overridable by `--base-url`)
+- **Output**:
+  - JSON mode (pretty printed)
+  - Human mode with enhanced table view (column selection, nested paths, size modifiers)
+- **Parallel execution & simple perf stats**:
+  - `--count`, `--duration`, `--concurrency`
+  - Prints success/error counts, average/min/max response time, and RPS
+- **Runtime helpers**:
+  - Handler registry + validation against `custom_handler:` in YAML
+  - Utilities to rebuild the subcommand path and collect validated variables
+
+## Architecture
 
 Typical architecture: mapping.yaml + OpenAPI → rclib → CLI binary → REST API server:
 
@@ -38,8 +60,6 @@ mapping.yaml ── commands/args ───┘
 ```
 
 > (*) The CLI Binary must be developed by the user following this guideline, and it can incorporate any additional custom logic as per the user's requirements.
-
-## Architecture
 
 ### Key Components
 
@@ -376,46 +396,25 @@ Execute a request multiple times:
 
 ```bash
 # Execute the same request 100 times
-mycli api-command --count 100
+mycli --count 100 api-command
 
 # Execute with 10 concurrent requests
-mycli api-command --count 100 --concurrency 10
+mycli --count 100 --concurrency 10 api-command
 
 # Execute requests for 30 seconds
-mycli api-command --duration 30
+mycli --duration 30 api-command
 
 # Execute requests for 60 seconds with 5 concurrent requests
-mycli api-command --duration 60 --concurrency 5
+mycli --duration 60 --concurrency 5 api-command
 ```
-
-### Global Options
-
-- `-n, --count N`: Execute the request N times (default: 1)
-- `-d, --duration N`: Execute requests for N seconds (overrides `--count`)
-- `-c, --concurrency N`: Execute up to N requests in parallel (default: 1)
 
 ### Performance Statistics
 
-When using `--count` or `--duration`, the library automatically provides execution statistics:
+The library supports simple performance testing:
 
-```
-======= Execution Summary =======
-Concurrency:             10
-Total execution time:    12.450s
-Total requests:          100
-Successful requests:     98 (98%)
-Failed requests:         2 (2%)
-Average response time:   0.124s  (min: 0.120s, max: 0.214s)
-Requests per second:     8.03
-```
-
-### Limitations
-
-- **Custom handlers**: Interactive commands (with `custom_handler`) cannot be executed in parallel
-- **JSON output**: Individual request responses are captured in JSON format during parallel execution
-- **Thread safety**: Each request runs in its own thread with independent HTTP clients
-
-### Execution Modes
+- `-n, --count N`: Execute the command N times (default: 1)
+- `-d, --duration N`: Execute the command for N seconds (overrides `--count`)
+- `-c, --concurrency N`: Execute up to N commands in parallel (default: 1)
 
 The library supports two execution modes:
 
@@ -429,6 +428,19 @@ The library supports two execution modes:
    - Good for sustained load testing scenarios
    - Overrides `--count` when specified
    - Example: `--duration 300` (5 minutes)
+
+When using `--count` or `--duration`, the library automatically provides execution statistics:
+
+```
+======= Execution Summary =======
+Concurrency:             10
+Total execution time:    12.450s
+Total requests:          100
+Successful requests:     98 (98%)
+Failed requests:         2 (2%)
+Average response time:   0.124s  (min: 0.120s, max: 0.214s)
+Requests per second:     8.03
+```
 
 ### Use Cases
 
@@ -690,4 +702,4 @@ When to pick rclib:
 
 ## Examples
 
-See `mapping_example.yaml` for comprehensive examples demonstrating all library features.
+See `dummyjson-cli` for comprehensive CLI tool example demonstrating all library features.
