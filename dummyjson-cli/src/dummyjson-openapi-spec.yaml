@@ -1,0 +1,450 @@
+openapi: 3.0.3
+info:
+  title: DummyJSON API
+  description: Free Fake REST API for Placeholder JSON Data - DummyJSON
+  version: 1.0.0
+servers:
+  - url: https://dummyjson.com
+paths:
+  /products:
+    get:
+      summary: Get list of products
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+          description: Limit number of items returned
+        - in: query
+          name: skip
+          schema:
+            type: integer
+          description: Skip number of items for pagination
+        - in: query
+          name: select
+          schema:
+            type: string
+          description: Comma separated list of product fields to select
+        - in: query
+          name: delay
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 5000
+          description: Artificial delay in milliseconds for response simulation
+      responses:
+        '200':
+          description: List of products
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  products:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Product'
+                  total:
+                    type: integer
+                  skip:
+                    type: integer
+                  limit:
+                    type: integer
+
+  /products/{id}:
+    get:
+      summary: Get product by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+          description: Product ID
+      responses:
+        '200':
+          description: Single product data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+
+  /users:
+    get:
+      summary: Get list of users
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+          description: Limit number of items returned
+        - in: query
+          name: skip
+          schema:
+            type: integer
+          description: Skip number of items for pagination
+        - in: query
+          name: select
+          schema:
+            type: string
+          description: Comma separated list of user fields to select
+        - in: query
+          name: delay
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 5000
+          description: Artificial delay in milliseconds for response simulation
+      responses:
+        '200':
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+                  total:
+                    type: integer
+                  skip:
+                    type: integer
+                  limit:
+                    type: integer
+
+  /users/{id}:
+    get:
+      summary: Get user by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+          description: User ID
+      responses:
+        '200':
+          description: Single user data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  /carts:
+    get:
+      summary: Get list of carts
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+          description: Limit number of items returned
+        - in: query
+          name: skip
+          schema:
+            type: integer
+          description: Skip number of items for pagination
+        - in: query
+          name: delay
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 5000
+          description: Artificial delay in milliseconds for response simulation
+      responses:
+        '200':
+          description: List of carts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  carts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Cart'
+                  total:
+                    type: integer
+                  skip:
+                    type: integer
+                  limit:
+                    type: integer
+
+  /carts/{id}:
+    get:
+      summary: Get cart by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+          description: Cart ID
+      responses:
+        '200':
+          description: Single cart data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cart'
+
+  /todos:
+    get:
+      summary: Get list of todos
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+          description: Limit number of items returned
+        - in: query
+          name: skip
+          schema:
+            type: integer
+          description: Skip number of items for pagination
+        - in: query
+          name: select
+          schema:
+            type: string
+          description: Comma separated list of todo fields to select
+        - in: query
+          name: delay
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 5000
+          description: Artificial delay in milliseconds for response simulation
+      responses:
+        '200':
+          description: List of todos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  todos:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Todo'
+                  total:
+                    type: integer
+                  skip:
+                    type: integer
+                  limit:
+                    type: integer
+
+  /posts:
+    get:
+      summary: Get list of posts
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+          description: Limit number of items returned
+        - in: query
+          name: skip
+          schema:
+            type: integer
+          description: Skip number of items for pagination
+        - in: query
+          name: select
+          schema:
+            type: string
+          description: Comma separated list of post fields to select
+        - in: query
+          name: delay
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 5000
+          description: Artificial delay in milliseconds for response simulation
+      responses:
+        '200':
+          description: List of posts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  posts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Post'
+                  total:
+                    type: integer
+                  skip:
+                    type: integer
+                  limit:
+                    type: integer
+
+  /auth/login:
+    post:
+      summary: Login to get access token
+      requestBody:
+        description: User login credentials
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login success with access token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+
+components:
+  schemas:
+    Product:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+        discountPercentage:
+          type: number
+        rating:
+          type: number
+        stock:
+          type: integer
+        brand:
+          type: string
+        category:
+          type: string
+        thumbnail:
+          type: string
+        images:
+          type: array
+          items:
+            type: string
+
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        firstName:
+          type: string
+        lastName:
+          type: string
+        maidenName:
+          type: string
+        age:
+          type: integer
+        gender:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        username:
+          type: string
+        password:
+          type: string
+        birthDate:
+          type: string
+          format: date
+        image:
+          type: string
+        bloodGroup:
+          type: string
+        height:
+          type: number
+        weight:
+          type: number
+        eyeColor:
+          type: string
+        hair:
+          type: object
+          properties:
+            color:
+              type: string
+            type:
+              type: string
+        address:
+          type: object
+          properties:
+            address:
+              type: string
+            city:
+              type: string
+            coordinates:
+              type: array
+              items:
+                type: number
+            postalCode:
+              type: string
+            state:
+              type: string
+
+    Cart:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        total:
+          type: number
+        discountedTotal:
+          type: number
+        totalProducts:
+          type: integer
+        totalQuantity:
+          type: integer
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+
+    Todo:
+      type: object
+      properties:
+        id:
+          type: integer
+        todo:
+          type: string
+        completed:
+          type: boolean
+        userId:
+          type: integer
+
+    Post:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        body:
+          type: string
+        userId:
+          type: integer
+        tags:
+          type: array
+          items:
+            type: string
+        reactions:
+          type: integer
+

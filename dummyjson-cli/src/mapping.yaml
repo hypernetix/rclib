@@ -1,0 +1,565 @@
+common_args:
+  limit:
+    name: limit
+    help: "Number of items to return"
+    long: limit
+    required: false
+    default: "30"
+  skip:
+    name: skip
+    help: "Number of items to skip for pagination"
+    long: skip
+    required: false
+    default: "0"
+  delay:
+    name: delay
+    help: "Artificial delay in milliseconds (0-5000)"
+    long: delay
+    required: false
+    default: "0"
+  select:
+    name: select
+    help: "Comma-separated list of fields to select"
+    long: select
+    required: false
+
+commands:
+
+  - name: products
+    about: "Product management and catalog operations"
+    common_args:
+      category:
+        name: category
+        help: "Product category filter"
+        long: category
+        required: false
+      min_price:
+        name: min_price
+        help: "Minimum price filter"
+        long: min-price
+        required: false
+      max_price:
+        name: max_price
+        help: "Maximum price filter"
+        long: max-price
+        required: false
+    subcommands:
+      - name: list
+        about: "Get list of all products with pagination and filtering"
+        method: GET
+        endpoint: "/products?limit={limit}&skip={skip}&select={select}&delay={delay}"
+        table_view: ["id", "title", "price", "category", "brand", "stock", "rating"]
+        args:
+          - inherit: limit
+          - inherit: skip
+          - inherit: select
+          - inherit: delay
+
+      - name: get
+        about: "Get a specific product by ID"
+        method: GET
+        endpoint: "/products/{id}"
+        args:
+          - name: id
+            help: "Product ID"
+            long: id
+            positional: true
+            required: true
+
+      - name: search
+        about: "Search products by query"
+        method: GET
+        endpoint: "/products/search?q={query}&limit={limit}&skip={skip}&select={select}"
+        table_view: ["id", "title", "price", "category", "rating"]
+        args:
+          - name: query
+            help: "Search query"
+            long: query
+            short: q
+            required: true
+          - inherit: limit
+          - inherit: skip
+          - inherit: select
+
+      - name: categories
+        about: "Get all product categories"
+        method: GET
+        endpoint: "/products/categories"
+        table_view: ["category"]
+
+      - name: by-category
+        about: "Get products by category"
+        method: GET
+        endpoint: "/products/category/{category}?limit={limit}&skip={skip}"
+        table_view: ["id", "title", "price", "brand", "stock"]
+        args:
+          - inherit: category
+            required: true
+          - inherit: limit
+          - inherit: skip
+
+  - name: users
+    about: "User management and profile operations"
+    common_args:
+      age_min:
+        name: age_min
+        help: "Minimum age filter"
+        long: age-min
+        required: false
+      age_max:
+        name: age_max
+        help: "Maximum age filter"
+        long: age-max
+        required: false
+      gender:
+        name: gender
+        help: "Gender filter (male/female)"
+        long: gender
+        required: false
+    subcommands:
+      - name: list
+        about: "Get list of all users with filtering"
+        method: GET
+        endpoint: "/users?limit={limit}&skip={skip}&select={select}&delay={delay}"
+        table_view: ["id", "firstName", "lastName", "email", "age", "gender", "phone"]
+        args:
+          - inherit: limit
+          - inherit: skip
+          - inherit: select
+          - inherit: delay
+
+      - name: get
+        about: "Get a specific user by ID"
+        method: GET
+        endpoint: "/users/{id}"
+        args:
+          - name: id
+            help: "User ID"
+            long: id
+            positional: true
+            required: true
+
+      - name: search
+        about: "Search users by query"
+        method: GET
+        endpoint: "/users/search?q={query}&limit={limit}&skip={skip}"
+        table_view: ["id", "firstName", "lastName", "email", "age"]
+        args:
+          - name: query
+            help: "Search query (name, email, etc.)"
+            long: query
+            short: q
+            required: true
+          - inherit: limit
+          - inherit: skip
+
+      - name: filter
+        about: "Filter users by criteria"
+        method: GET
+        endpoint: "/users/filter?key={field}&value={value}&limit={limit}&skip={skip}"
+        table_view: ["id", "firstName", "lastName", "email", "age", "gender"]
+        args:
+          - name: field
+            help: "Field to filter by (age, gender, bloodGroup, etc.)"
+            long: field
+            required: true
+          - name: value
+            help: "Value to filter by"
+            long: value
+            required: true
+          - inherit: limit
+          - inherit: skip
+
+  - name: carts
+    about: "Shopping cart management"
+    subcommands:
+      - name: list
+        about: "Get all shopping carts"
+        method: GET
+        endpoint: "/carts?limit={limit}&skip={skip}&delay={delay}"
+        table_view: ["id", "userId", "totalProducts", "totalQuantity", "total:mb", "discountedTotal"]
+        args:
+          - inherit: limit
+          - inherit: skip
+          - inherit: delay
+
+      - name: get
+        about: "Get a specific cart by ID"
+        method: GET
+        endpoint: "/carts/{id}"
+        args:
+          - name: id
+            help: "Cart ID"
+            long: id
+            positional: true
+            required: true
+
+      - name: user-carts
+        about: "Get carts for a specific user"
+        method: GET
+        endpoint: "/carts/user/{user_id}"
+        table_view: ["id", "totalProducts", "totalQuantity", "total", "discountedTotal"]
+        args:
+          - name: user_id
+            help: "User ID"
+            long: user-id
+            required: true
+
+      - name: add
+        about: "Add a new cart"
+        method: POST
+        endpoint: "/carts/add"
+        body: '{"userId": {user_id}, "products": {products}}'
+        headers:
+          Content-Type: application/json
+        args:
+          - name: user_id
+            help: "User ID for the cart"
+            long: user-id
+            required: true
+          - name: products
+            help: "JSON array of products with id and quantity"
+            long: products
+            required: true
+            default: '[{"id": 1, "quantity": 1}]'
+          - name: products_file
+            help: "Path to JSON file with products data"
+            long: products-file
+            required: false
+            type: file
+            file-overrides-value-of: products
+
+  - name: todos
+    about: "Todo list management"
+    common_args:
+      completed:
+        name: completed
+        help: "Filter by completion status"
+        long: completed
+        required: false
+        type: bool
+        value:
+          if_set: "true"
+          if_not_set: "false"
+    subcommands:
+      - name: list
+        about: "Get all todos with filtering"
+        method: GET
+        endpoint: "/todos?limit={limit}&skip={skip}&select={select}&delay={delay}"
+        table_view: ["id", "todo", "completed", "userId"]
+        args:
+          - inherit: limit
+          - inherit: skip
+          - inherit: select
+          - inherit: delay
+
+      - name: get
+        about: "Get a specific todo by ID"
+        method: GET
+        endpoint: "/todos/{id}"
+        args:
+          - name: id
+            help: "Todo ID"
+            long: id
+            positional: true
+            required: true
+
+      - name: user-todos
+        about: "Get todos for a specific user"
+        method: GET
+        endpoint: "/todos/user/{user_id}?limit={limit}&skip={skip}"
+        table_view: ["id", "todo", "completed"]
+        args:
+          - name: user_id
+            help: "User ID"
+            long: user-id
+            required: true
+          - inherit: limit
+          - inherit: skip
+
+      - name: add
+        about: "Add a new todo"
+        method: POST
+        endpoint: "/todos/add"
+        body: '{"todo": "{todo}", "completed": {completed}, "userId": {user_id}}'
+        headers:
+          Content-Type: application/json
+        args:
+          - name: todo
+            help: "Todo description"
+            long: todo
+            required: true
+          - name: user_id
+            help: "User ID who owns this todo"
+            long: user-id
+            required: true
+          - inherit: completed
+
+      - name: update
+        about: "Update an existing todo"
+        method: PUT
+        endpoint: "/todos/{id}"
+        body: '{"completed": {completed}}'
+        headers:
+          Content-Type: application/json
+        args:
+          - name: id
+            help: "Todo ID to update"
+            long: id
+            required: true
+          - inherit: completed
+            required: true
+
+      - name: delete
+        about: "Delete a todo"
+        method: DELETE
+        endpoint: "/todos/{id}"
+        args:
+          - name: id
+            help: "Todo ID to delete"
+            long: id
+            positional: true
+            required: true
+
+  - name: posts
+    about: "Blog posts and content management"
+    common_args:
+      author_id:
+        name: author_id
+        help: "Filter by author user ID"
+        long: author-id
+        required: false
+    subcommands:
+      - name: list
+        about: "Get all posts"
+        method: GET
+        endpoint: "/posts?limit={limit}&skip={skip}&select={select}&delay={delay}"
+        table_view: ["id", "title", "userId", "reactions", "tags"]
+        args:
+          - inherit: limit
+          - inherit: skip
+          - inherit: select
+          - inherit: delay
+
+      - name: get
+        about: "Get a specific post by ID"
+        method: GET
+        endpoint: "/posts/{id}"
+        args:
+          - name: id
+            help: "Post ID"
+            long: id
+            positional: true
+            required: true
+
+      - name: search
+        about: "Search posts by query"
+        method: GET
+        endpoint: "/posts/search?q={query}&limit={limit}&skip={skip}"
+        table_view: ["id", "title", "userId", "reactions"]
+        args:
+          - name: query
+            help: "Search query"
+            long: query
+            short: q
+            required: true
+          - inherit: limit
+          - inherit: skip
+
+      - name: user-posts
+        about: "Get posts by specific user"
+        method: GET
+        endpoint: "/posts/user/{user_id}?limit={limit}&skip={skip}"
+        table_view: ["id", "title", "reactions", "tags"]
+        args:
+          - name: user_id
+            help: "User ID"
+            long: user-id
+            required: true
+          - inherit: limit
+          - inherit: skip
+
+      - name: add
+        about: "Create a new post"
+        method: POST
+        endpoint: "/posts/add"
+        body: '{"title": "{title}", "body": "{body}", "userId": {user_id}, "tags": {tags}}'
+        headers:
+          Content-Type: application/json
+        args:
+          - name: title
+            help: "Post title"
+            long: title
+            required: true
+          - name: body
+            help: "Post content"
+            long: body
+            required: false
+          - name: user_id
+            help: "Author user ID"
+            long: user-id
+            required: true
+          - name: tags
+            help: "JSON array of tags"
+            long: tags
+            required: false
+            default: '["general"]'
+          - name: content_file
+            help: "Path to file containing post body content"
+            long: content-file
+            required: false
+            type: file
+            file-overrides-value-of: body
+
+  - name: auth
+    about: "Authentication and session management"
+    subcommands:
+      - name: login
+        about: "Login with username and password"
+        method: POST
+        endpoint: "/auth/login"
+        body: '{"username": "{username}", "password": "{password}"}'
+        headers:
+          Content-Type: application/json
+        args:
+          - name: username
+            help: "Username (try: kminchelle)"
+            long: username
+            short: u
+            required: true
+          - name: password
+            help: "Password (try: 0lelplR)"
+            long: password
+            short: p
+            required: true
+
+      - name: me
+        about: "Get current user profile (requires token)"
+        method: GET
+        endpoint: "/auth/me"
+        headers:
+          Authorization: "Bearer {token}"
+        args:
+          - name: token
+            help: "Access token from login"
+            long: token
+            short: t
+            required: true
+
+      - name: refresh
+        about: "Refresh access token"
+        method: POST
+        endpoint: "/auth/refresh"
+        body: '{"refreshToken": "{refresh_token}"}'
+        headers:
+          Content-Type: application/json
+        args:
+          - name: refresh_token
+            help: "Refresh token"
+            long: refresh-token
+            required: true
+
+  - name: scenario
+    about: "Complex multi-step operations"
+    subcommands:
+      - name: user-shopping-summary
+        about: "Get comprehensive user shopping data with polling simulation"
+        scenario:
+          type: "job_with_polling"
+          steps:
+            - name: "schedule_job"
+              method: POST
+              endpoint: "/test/delay"
+              body: |
+                {
+                  "delay_ms": 2000,
+                  "user_id": {user_id},
+                  "operation": "user_shopping_summary"
+                }
+              headers:
+                Content-Type: application/json
+              extract_response:
+                job_id: "$.job_id"
+            - name: "poll_job"
+              method: GET
+              endpoint: "/users/{user_id}"
+              polling:
+                interval_seconds: 1
+                timeout_seconds: 30
+                completion_conditions:
+                  - status: "success"
+                    action: "success"
+                  - status: "error"
+                    action: "error"
+                    error_field: "$.error"
+        args:
+          - name: user_id
+            help: "User ID to analyze"
+            long: user-id
+            required: true
+
+  - name: batch
+    about: "Batch operations and data processing"
+    subcommands:
+      - name: export-users
+        about: "Export user data with custom processing"
+        custom_handler: "export_users"
+        args:
+          - name: format
+            help: "Export format (json, csv, xml)"
+            long: format
+            required: false
+            default: "json"
+          - name: output_file
+            help: "Output file path"
+            long: output
+            short: o
+            required: false
+            default: "users_export.json"
+          - name: include_sensitive
+            help: "Include sensitive data (email, phone)"
+            long: include-sensitive
+            required: false
+            type: bool
+            value:
+              if_set: "true"
+              if_not_set: "false"
+          - inherit: limit
+            default: "100"
+          - inherit: skip
+
+      - name: product-analytics
+        about: "Generate product analytics report"
+        custom_handler: "product_analytics"
+        args:
+          - name: report_type
+            help: "Type of report (summary, detailed, trends)"
+            long: report-type
+            required: false
+            default: "summary"
+          - name: category_filter
+            help: "Filter by specific category"
+            long: category
+            required: false
+          - name: price_range
+            help: "Price range filter (e.g., '10-100')"
+            long: price-range
+            required: false
+          - name: output_format
+            help: "Output format (json, table, chart)"
+            long: output-format
+            required: false
+            default: "table"
+
+  - name: performance
+    about: "Performance testing and load simulation"
+    subcommands:
+      - name: load-test
+        about: "Run load test on products endpoint"
+        method: GET
+        endpoint: "/products?limit=10&delay={delay}"
+        table_view: ["total", "products"]
+        args:
+          - inherit: delay
+            default: "100"
+            help: "Response delay for load testing"
