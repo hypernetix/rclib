@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use clap::{Arg, ArgAction, ArgMatches, Command};
 
 use crate::mapping::*;
-use crate::{build_request_from_command, execute_requests_loop, OutputFormat, RequestSpec, RawRequestSpec};
+use crate::{build_request_from_command, execute_requests_loop, ExecutionConfig, OutputFormat, RequestSpec, RawRequestSpec};
 
 #[derive(Default)]
 struct TreeNode {
@@ -88,7 +88,7 @@ pub fn build_cli(mapping_root: &MappingRoot, default_base_url: &str) -> (Command
                                     cmd.pattern
                                         .split_whitespace()
                                         .filter(|t| !is_placeholder(t))
-                                        .last()
+                                        .next_back()
                                         .unwrap_or("")
                                         .to_string()
                                 } else {
@@ -292,7 +292,7 @@ fn add_children_subcommands(mut cmd: Command, path: Vec<String>, node: &TreeNode
     cmd
 }
 
-pub fn collect_subcommand_path<'a>(matches: &'a ArgMatches) -> (Vec<String>, &'a ArgMatches) {
+pub fn collect_subcommand_path(matches: &ArgMatches) -> (Vec<String>, &ArgMatches) {
     let mut path: Vec<String> = Vec::new();
     let mut current = matches;
     while let Some((name, sub_m)) = current.subcommand() {
@@ -307,7 +307,7 @@ pub fn collect_subcommand_path<'a>(matches: &'a ArgMatches) -> (Vec<String>, &'a
 pub fn print_manual_help(path: &[String], cmd: &CommandSpec) {
     // NAME
     let prog = "hscli";
-    let title = cmd.about.clone().unwrap_or_else(|| String::new());
+    let title = cmd.about.clone().unwrap_or_default();
     if title.is_empty() {
         println!("{} {} -", prog, path.join(" "));
     } else {
@@ -330,10 +330,8 @@ pub fn print_manual_help(path: &[String], cmd: &CommandSpec) {
 
 pub fn pre_scan_value(args: &[String], key: &str) -> Option<String> {
     for i in 0..args.len() {
-        if args[i] == key {
-            if i + 1 < args.len() {
-                return Some(args[i + 1].clone());
-            }
+        if args[i] == key && i + 1 < args.len() {
+            return Some(args[i + 1].clone());
         }
         if let Some(rest) = args[i].strip_prefix(&(key.to_string() + "=")) {
             return Some(rest.to_string());
@@ -348,19 +346,21 @@ pub fn pre_scan_value(args: &[String], key: &str) -> Option<String> {
 
 pub type CustomHandlerFn = dyn Fn(&HashMap<String, String>, &str, bool) -> anyhow::Result<()> + Send + Sync + 'static;
 
+#[derive(Default)]
 pub struct HandlerRegistry {
     handlers: HashMap<String, Box<CustomHandlerFn>>,
 }
 
 impl HandlerRegistry {
-    pub fn new() -> Self { Self { handlers: HashMap::new() } }
+    #[must_use]
+    pub fn new() -> Self { Self::default() }
     pub fn register<F>(&mut self, name: &str, f: F)
     where
         F: Fn(&HashMap<String, String>, &str, bool) -> anyhow::Result<()> + Send + Sync + 'static,
     {
         self.handlers.insert(name.to_string(), Box::new(f));
     }
-    pub fn get(&self, name: &str) -> Option<&Box<CustomHandlerFn>> { self.handlers.get(name) }
+    pub fn get(&self, name: &str) -> Option<&CustomHandlerFn> { self.handlers.get(name).map(AsRef::as_ref) }
 }
 
 pub fn validate_handlers(root: &MappingRoot, registry: &HandlerRegistry) -> anyhow::Result<()> {
@@ -422,13 +422,11 @@ fn collect_vars_from_matches(cmd: &CommandSpec, leaf: &ArgMatches) -> (HashMap<S
                     vars.insert(var_name, if is_set { "true".to_string() } else { "false".to_string() });
                 }
             }
-        } else {
-            if let Some(val) = leaf.get_one::<String>(&name) {
-                if let Some(var_name) = arg.name.clone() { vars.insert(var_name.clone(), val.clone()); selected.insert(var_name); }
-            } else if let Some(def) = &arg.default {
-                if let Some(var_name) = arg.name.clone() { vars.insert(var_name, def.clone()); }
-            } else if arg.required.unwrap_or(false) { missing_required = true; }
-        }
+        } else if let Some(val) = leaf.get_one::<String>(&name) {
+            if let Some(var_name) = arg.name.clone() { vars.insert(var_name.clone(), val.clone()); selected.insert(var_name); }
+        } else if let Some(def) = &arg.default {
+            if let Some(var_name) = arg.name.clone() { vars.insert(var_name, def.clone()); }
+        } else if arg.required.unwrap_or(false) { missing_required = true; }
     }
     (vars, selected, missing_required)
 }
@@ -443,11 +441,17 @@ pub fn drive_command(
     let base_url = matches.get_one::<String>("base-url").cloned().unwrap_or_else(|| default_base_url.to_string());
     let json_output = matches.get_flag("json-output");
     let verbose = matches.get_flag("verbose");
-    let conn_timeout_secs = parse_timeout(matches, "conn-timeout");
-    let request_timeout_secs = parse_timeout(matches, "timeout");
-    let count = matches.get_one::<u32>("count").copied();
-    let duration_secs = matches.get_one::<u32>("duration").copied().unwrap_or(0);
-    let concurrency = matches.get_one::<u32>("concurrency").copied().unwrap_or(1);
+
+    let config = ExecutionConfig {
+        output: if json_output { OutputFormat::Json } else { OutputFormat::Human },
+        conn_timeout_secs: parse_timeout(matches, "conn-timeout"),
+        request_timeout_secs: parse_timeout(matches, "timeout"),
+        user_agent,
+        verbose,
+        count: matches.get_one::<u32>("count").copied(),
+        duration_secs: matches.get_one::<u32>("duration").copied().unwrap_or(0),
+        concurrency: matches.get_one::<u32>("concurrency").copied().unwrap_or(1),
+    };
 
     // RAW subcommand handled here
     if let Some(("raw", raw_m)) = matches.subcommand() {
@@ -456,7 +460,7 @@ pub fn drive_command(
         let headers: Vec<String> = raw_m.get_many::<String>("header").map(|v| v.cloned().collect()).unwrap_or_default();
         let body = raw_m.get_one::<String>("body").cloned();
         let raw_spec = RawRequestSpec { base_url: Some(base_url.clone()), method, endpoint, headers, body, multipart: false, file_fields: HashMap::new(), table_view: None };
-        return execute_requests_loop(&RequestSpec::Simple(raw_spec), if json_output { OutputFormat::Json } else { OutputFormat::Human }, conn_timeout_secs, request_timeout_secs, user_agent, verbose, count, duration_secs, concurrency);
+        return execute_requests_loop(&RequestSpec::Simple(raw_spec), &config);
     }
 
     // Build path->command map and current path
@@ -477,7 +481,7 @@ pub fn drive_command(
                 h(vars, &base_url, json_output)?;
                 Ok(0)
             }
-            _ => execute_requests_loop(&spec, if json_output { OutputFormat::Json } else { OutputFormat::Human }, conn_timeout_secs, request_timeout_secs, user_agent, verbose, count, duration_secs, concurrency),
+            _ => execute_requests_loop(&spec, &config),
         }
     } else {
         // Intermediate path: print nested help

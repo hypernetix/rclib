@@ -184,6 +184,7 @@ pub struct CommandGroup {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
+#[allow(clippy::large_enum_variant)]
 pub enum CommandNode {
     Command(CommandSpec),
     Group(CommandGroup),

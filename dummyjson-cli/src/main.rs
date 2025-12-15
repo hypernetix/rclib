@@ -3,10 +3,6 @@ use std::fs;
 use std::collections::HashMap;
 
 use anyhow::{Context, Result};
-use serde_json;
-// no direct clap types needed here; delegated to rclib
-
-use rclib;
 
 const EMBEDDED_OPENAPI: &str = include_str!("dummyjson-openapi-spec.yaml");
 const EMBEDDED_MAPPING: &str = include_str!("mapping.yaml");
@@ -36,7 +32,7 @@ fn real_main() -> Result<()> {
         EMBEDDED_OPENAPI.to_string()
     };
     let openapi = rclib::parse_openapi(&openapi_text).context("OpenAPI parsing failed")?;
-    let default_base_url = openapi.servers.get(0).map(|s| s.url.clone()).unwrap_or_else(|| {
+    let default_base_url = openapi.servers.first().map(|s| s.url.clone()).unwrap_or_else(|| {
         "https://dummyjson.com".to_string()
     });
 

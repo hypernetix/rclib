@@ -57,6 +57,35 @@ pub struct ScenarioSpec {
     pub vars: HashMap<String, String>,
 }
 
+/// Configuration for request execution including timeouts, output format, and load testing options.
+#[derive(Debug, Clone)]
+pub struct ExecutionConfig<'a> {
+    pub output: OutputFormat,
+    pub conn_timeout_secs: Option<f64>,
+    pub request_timeout_secs: Option<f64>,
+    pub user_agent: &'a str,
+    pub verbose: bool,
+    pub count: Option<u32>,
+    pub duration_secs: u32,
+    pub concurrency: u32,
+}
+
+impl<'a> ExecutionConfig<'a> {
+    #[must_use]
+    pub fn new(user_agent: &'a str) -> Self {
+        Self {
+            output: OutputFormat::Human,
+            conn_timeout_secs: None,
+            request_timeout_secs: None,
+            user_agent,
+            verbose: false,
+            count: None,
+            duration_secs: 0,
+            concurrency: 1,
+        }
+    }
+}
+
 /// Parse OpenAPI from YAML or JSON string.
 pub fn parse_openapi(spec: &str) -> Result<OpenAPI> {
     // Try YAML first, then JSON
@@ -67,6 +96,24 @@ pub fn parse_openapi(spec: &str) -> Result<OpenAPI> {
     let json_attempt = serde_json::from_str::<OpenAPI>(spec)
         .context("Failed to parse OpenAPI as YAML, and also failed to parse as JSON")?;
     Ok(json_attempt)
+}
+
+/// Apply file overrides: for args with type="file" and file_overrides_value_of,
+/// read file content and insert into vars under the target variable name.
+fn apply_file_overrides(args: &[mapping::ArgSpec], vars: &mut HashMap<String, String>) {
+    for arg in args {
+        let dominated_var = arg.arg_type.as_deref() == Some("file")
+            && arg.file_overrides_value_of.is_some()
+            && arg.name.as_ref().and_then(|n| vars.get(n)).is_some_and(|p| !p.is_empty());
+        if !dominated_var { continue; }
+
+        let target_var = arg.file_overrides_value_of.as_ref().unwrap();
+        let file_path = vars.get(arg.name.as_ref().unwrap()).unwrap();
+
+        if let Ok(content) = std::fs::read_to_string(file_path) {
+            vars.insert(target_var.clone(), content);
+        }
+    }
 }
 
 /// Build a RequestSpec from a command entry and variable map, handling simple, scenario, and custom handler commands.
@@ -82,28 +129,7 @@ pub fn build_request_from_command(
         let mut vars_with_builtins = vars.clone();
         vars_with_builtins.insert("uuid".to_string(), Uuid::new_v4().to_string());
 
-        // Handle file overrides for custom handler commands
-        for arg in &cmd.args {
-            if arg.arg_type.as_deref() == Some("file") {
-                if let Some(target_var) = &arg.file_overrides_value_of {
-                    if let Some(arg_name) = &arg.name {
-                        if let Some(file_path) = vars_with_builtins.get(arg_name) {
-                            if !file_path.is_empty() {
-                                match std::fs::read_to_string(file_path) {
-                                    Ok(file_content) => {
-                                        vars_with_builtins.insert(target_var.clone(), file_content);
-                                    }
-                                    Err(_) => {
-                                        // For library code, we'll just skip the file override on error
-                                        // The calling code can handle validation if needed
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        apply_file_overrides(&cmd.args, &mut vars_with_builtins);
 
         return RequestSpec::CustomHandler {
             handler_name: handler_name.clone(),
@@ -117,28 +143,7 @@ pub fn build_request_from_command(
         let mut vars_with_builtins = vars.clone();
         vars_with_builtins.insert("uuid".to_string(), Uuid::new_v4().to_string());
 
-        // Handle file overrides for scenario commands too
-        for arg in &cmd.args {
-            if arg.arg_type.as_deref() == Some("file") {
-                if let Some(target_var) = &arg.file_overrides_value_of {
-                    if let Some(arg_name) = &arg.name {
-                        if let Some(file_path) = vars_with_builtins.get(arg_name) {
-                            if !file_path.is_empty() {
-                                match std::fs::read_to_string(file_path) {
-                                    Ok(file_content) => {
-                                        vars_with_builtins.insert(target_var.clone(), file_content);
-                                    }
-                                    Err(_) => {
-                                        // For library code, we'll just skip the file override on error
-                                        // The calling code can handle validation if needed
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        apply_file_overrides(&cmd.args, &mut vars_with_builtins);
 
         return RequestSpec::Scenario(ScenarioSpec {
             base_url,
@@ -155,29 +160,7 @@ pub fn build_request_from_command(
     let mut vars_with_builtins = vars.clone();
     vars_with_builtins.insert("uuid".to_string(), Uuid::new_v4().to_string());
 
-    // Handle file overrides: if an arg has type="file" and file-overrides-value-of,
-    // read the file content and replace the target variable's value
-    for arg in &cmd.args {
-        if arg.arg_type.as_deref() == Some("file") {
-            if let Some(target_var) = &arg.file_overrides_value_of {
-                if let Some(arg_name) = &arg.name {
-                    if let Some(file_path) = vars_with_builtins.get(arg_name) {
-                        if !file_path.is_empty() {
-                            match std::fs::read_to_string(file_path) {
-                                Ok(file_content) => {
-                                    vars_with_builtins.insert(target_var.clone(), file_content);
-                                }
-                                Err(_) => {
-                                    // For library code, we'll just skip the file override on error
-                                    // The calling code can handle validation if needed
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    apply_file_overrides(&cmd.args, &mut vars_with_builtins);
 
     // Start with command-level values
     let mut method = method;
@@ -306,15 +289,19 @@ fn execute_worker_request(
 /// Execute a request with count, duration, and concurrency control
 pub fn execute_requests_loop(
     spec: &RequestSpec,
-    output: OutputFormat,
-    conn_timeout_secs: Option<f64>,
-    request_timeout_secs: Option<f64>,
-    user_agent: &str,
-    verbose: bool,
-    count: Option<u32>,
-    duration_secs: u32,
-    concurrency: u32,
+    config: &ExecutionConfig<'_>,
 ) -> Result<i32> {
+    let ExecutionConfig {
+        output,
+        conn_timeout_secs,
+        request_timeout_secs,
+        user_agent,
+        verbose,
+        count,
+        duration_secs,
+        concurrency,
+    } = *config;
+
     // Determine execution mode: duration-based or count-based
     let use_duration = duration_secs > 0;
     let target_count = if use_duration {
@@ -902,7 +889,7 @@ fn print_human_readable(v: &serde_json::Value, table_view: Option<&Vec<String>>)
             }
             // Then print arrays as tables
             for (k, val) in array_entries {
-                println!("");
+                println!();
                 println!("{}:", k);
                 if let serde_json::Value::Array(arr) = val {
                     print_array_table(arr, table_view);
@@ -1054,8 +1041,8 @@ fn get_value_by_path<'a>(v: &'a serde_json::Value, path: &str) -> &'a serde_json
 }
 
 fn humanize_column_label(path: &str) -> String {
-    let last = path.split('.').last().unwrap_or(path);
-    let spaced = last.replace('_', " ").replace('-', " ");
+    let last = path.split('.').next_back().unwrap_or(path);
+    let spaced = last.replace(['_', '-'], " ");
     let mut out_words: Vec<String> = Vec::new();
     for w in spaced.split_whitespace() {
         if w.is_empty() { continue; }
