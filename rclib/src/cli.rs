@@ -396,7 +396,7 @@ fn parse_timeout(matches: &ArgMatches, arg_name: &str) -> Option<f64> {
     matches.get_one::<String>(arg_name).and_then(|s| s.parse::<f64>().ok()).filter(|v| *v >= 0.0)
 }
 
-fn collect_vars_from_matches(cmd: &CommandSpec, leaf: &ArgMatches) -> (HashMap<String, String>, HashSet<String>, bool) {
+pub fn collect_vars_from_matches(cmd: &CommandSpec, leaf: &ArgMatches) -> (HashMap<String, String>, HashSet<String>, bool) {
     let arg_specs: Vec<ArgSpec> = if cmd.args.is_empty() { derive_args_from_pattern(&cmd.pattern) } else { cmd.args.clone() };
     let mut vars: HashMap<String, String> = HashMap::new();
     let mut selected: HashSet<String> = HashSet::new();
@@ -493,5 +493,1067 @@ pub fn drive_command(
         let _ = cmd.clone().print_help();
         println!();
         Ok(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ==================== pre_scan_value tests ====================
+
+    #[test]
+    fn test_pre_scan_value_space_separated() {
+        let args = vec![
+            "cli".to_string(),
+            "--base-url".to_string(),
+            "https://api.example.com".to_string(),
+            "users".to_string(),
+        ];
+        let result = pre_scan_value(&args, "--base-url");
+        assert_eq!(result, Some("https://api.example.com".to_string()));
+    }
+
+    #[test]
+    fn test_pre_scan_value_equals_separated() {
+        let args = vec![
+            "cli".to_string(),
+            "--base-url=https://api.example.com".to_string(),
+            "users".to_string(),
+        ];
+        let result = pre_scan_value(&args, "--base-url");
+        assert_eq!(result, Some("https://api.example.com".to_string()));
+    }
+
+    #[test]
+    fn test_pre_scan_value_not_found() {
+        let args = vec!["cli".to_string(), "users".to_string()];
+        let result = pre_scan_value(&args, "--base-url");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_pre_scan_value_at_end_no_value() {
+        let args = vec!["cli".to_string(), "--base-url".to_string()];
+        let result = pre_scan_value(&args, "--base-url");
+        assert_eq!(result, None); // No value after the key
+    }
+
+    #[test]
+    fn test_pre_scan_value_empty_args() {
+        let args: Vec<String> = vec![];
+        let result = pre_scan_value(&args, "--base-url");
+        assert_eq!(result, None);
+    }
+
+    // ==================== HandlerRegistry tests ====================
+
+    #[test]
+    fn test_handler_registry_new() {
+        let reg = HandlerRegistry::new();
+        assert!(reg.get("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_handler_registry_register_and_get() {
+        let mut reg = HandlerRegistry::new();
+        reg.register("test_handler", |_vars, _base_url, _json| Ok(()));
+        assert!(reg.get("test_handler").is_some());
+        assert!(reg.get("other_handler").is_none());
+    }
+
+    // ==================== build_cli tests ====================
+
+    #[test]
+    fn test_build_cli_hierarchical_creates_subcommands() {
+        let yaml = r#"
+commands:
+  - name: users
+    about: "User management"
+    subcommands:
+      - name: list
+        method: GET
+        endpoint: /users
+      - name: get
+        method: GET
+        endpoint: /users/{id}
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, path_map) = build_cli(&root, "https://api.example.com");
+
+        // Verify command structure
+        let subcommands: Vec<_> = app.get_subcommands().collect();
+        let users_cmd = subcommands.iter().find(|c| c.get_name() == "users");
+        assert!(users_cmd.is_some());
+
+        // Verify path map has entries
+        assert!(path_map.contains_key(&vec!["users".to_string(), "list".to_string()]));
+        assert!(path_map.contains_key(&vec!["users".to_string(), "get".to_string()]));
+    }
+
+    #[test]
+    fn test_build_cli_adds_global_args() {
+        let yaml = r#"
+commands:
+  - name: users
+    subcommands:
+      - name: list
+        method: GET
+        endpoint: /users
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+
+        // Verify global args exist
+        let args: Vec<_> = app.get_arguments().collect();
+        let arg_names: Vec<_> = args.iter().map(|a| a.get_id().as_str()).collect();
+
+        assert!(arg_names.contains(&"base-url"));
+        assert!(arg_names.contains(&"json-output"));
+        assert!(arg_names.contains(&"verbose"));
+    }
+
+    #[test]
+    fn test_build_cli_nested_groups() {
+        let yaml = r#"
+commands:
+  - name: org
+    about: "Organization commands"
+    subcommands:
+      - name: members
+        about: "Member management"
+        subcommands:
+          - name: list
+            method: GET
+            endpoint: /org/{org_id}/members
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (_, path_map) = build_cli(&root, "https://api.example.com");
+
+        // Verify deeply nested path
+        let path = vec!["org".to_string(), "members".to_string(), "list".to_string()];
+        assert!(path_map.contains_key(&path));
+    }
+
+    // ==================== validate_handlers tests ====================
+
+    #[test]
+    fn test_validate_handlers_all_registered() {
+        let yaml = r#"
+commands:
+  - name: export
+    subcommands:
+      - name: users
+        custom_handler: export_users
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let mut reg = HandlerRegistry::new();
+        reg.register("export_users", |_, _, _| Ok(()));
+
+        let result = validate_handlers(&root, &reg);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_handlers_missing() {
+        let yaml = r#"
+commands:
+  - name: export
+    subcommands:
+      - name: users
+        custom_handler: export_users
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let reg = HandlerRegistry::new(); // No handlers registered
+
+        let result = validate_handlers(&root, &reg);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("export_users"));
+    }
+
+    // ==================== collect_subcommand_path tests ====================
+
+    #[test]
+    fn test_collect_subcommand_path_simple() {
+        let yaml = r#"
+commands:
+  - name: users
+    subcommands:
+      - name: list
+        method: GET
+        endpoint: /users
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+        let matches = app.try_get_matches_from(["cli", "users", "list"]).unwrap();
+
+        let (path, _leaf) = collect_subcommand_path(&matches);
+        assert_eq!(path, vec!["users".to_string(), "list".to_string()]);
+    }
+
+    #[test]
+    fn test_collect_subcommand_path_empty() {
+        let yaml = r#"
+commands:
+  - name: users
+    subcommands:
+      - name: list
+        method: GET
+        endpoint: /users
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+        let matches = app.try_get_matches_from(["cli"]).unwrap();
+
+        let (path, _) = collect_subcommand_path(&matches);
+        assert!(path.is_empty());
+    }
+
+    // ==================== collect_vars_from_matches tests ====================
+
+    #[test]
+    fn test_collect_vars_with_defaults() {
+        let cmd = CommandSpec {
+            name: Some("list".to_string()),
+            about: None,
+            pattern: "users list".to_string(),
+            method: Some("GET".to_string()),
+            endpoint: Some("/users".to_string()),
+            body: None,
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: None,
+            multipart: false,
+            custom_handler: None,
+            args: vec![
+                ArgSpec {
+                    name: Some("limit".to_string()),
+                    default: Some("10".to_string()),
+                    required: Some(false),
+                    ..Default::default()
+                },
+            ],
+            use_common_args: vec![],
+        };
+
+        let yaml = r#"
+commands:
+  - name: users
+    subcommands:
+      - name: list
+        method: GET
+        endpoint: /users
+        args:
+          - name: limit
+            default: "10"
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+        let matches = app.try_get_matches_from(["cli", "users", "list"]).unwrap();
+        let (_, leaf) = collect_subcommand_path(&matches);
+
+        let (vars, _, missing) = collect_vars_from_matches(&cmd, leaf);
+        assert!(!missing);
+        assert_eq!(vars.get("limit"), Some(&"10".to_string()));
+    }
+
+    #[test]
+    fn test_collect_vars_with_provided_value() {
+        let cmd = CommandSpec {
+            name: Some("list".to_string()),
+            about: None,
+            pattern: "users list".to_string(),
+            method: Some("GET".to_string()),
+            endpoint: Some("/users".to_string()),
+            body: None,
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: None,
+            multipart: false,
+            custom_handler: None,
+            args: vec![
+                ArgSpec {
+                    name: Some("limit".to_string()),
+                    long: Some("limit".to_string()),
+                    default: Some("10".to_string()),
+                    required: Some(false),
+                    ..Default::default()
+                },
+            ],
+            use_common_args: vec![],
+        };
+
+        let yaml = r#"
+commands:
+  - name: users
+    subcommands:
+      - name: list
+        method: GET
+        endpoint: /users
+        args:
+          - name: limit
+            long: limit
+            default: "10"
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+        let matches = app.try_get_matches_from(["cli", "users", "list", "--limit", "50"]).unwrap();
+        let (_, leaf) = collect_subcommand_path(&matches);
+
+        let (vars, selected, _) = collect_vars_from_matches(&cmd, leaf);
+        assert_eq!(vars.get("limit"), Some(&"50".to_string()));
+        assert!(selected.contains("limit"));
+    }
+
+    // ==================== Flat spec handling tests ====================
+
+    #[test]
+    fn test_build_cli_flat_spec() {
+        let yaml = r#"
+commands:
+  - pattern: "users list"
+    method: GET
+    endpoint: /users
+  - pattern: "users get {id}"
+    method: GET
+    endpoint: /users/{id}
+"#;
+        let flat = parse_flat_spec(yaml).unwrap();
+        let root = MappingRoot::Flat(flat);
+        let (app, path_map) = build_cli(&root, "https://api.example.com");
+
+        // Verify flat commands are parsed
+        assert!(path_map.contains_key(&vec!["users".to_string(), "list".to_string()]));
+        assert!(path_map.contains_key(&vec!["users".to_string(), "get".to_string()]));
+
+        // Verify CLI structure
+        let subcommands: Vec<_> = app.get_subcommands().collect();
+        assert!(subcommands.iter().any(|c| c.get_name() == "users"));
+    }
+
+    #[test]
+    fn test_build_cli_with_positional_args() {
+        let yaml = r#"
+commands:
+  - name: users
+    subcommands:
+      - name: get
+        method: GET
+        endpoint: /users/{id}
+        args:
+          - name: id
+            positional: true
+            required: true
+            help: "User ID"
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+
+        // Should be able to parse positional arg
+        let matches = app.try_get_matches_from(["cli", "users", "get", "123"]).unwrap();
+        let (path, leaf) = collect_subcommand_path(&matches);
+        assert_eq!(path, vec!["users", "get"]);
+        assert_eq!(leaf.get_one::<String>("id"), Some(&"123".to_string()));
+    }
+
+    #[test]
+    fn test_build_cli_with_short_args() {
+        let yaml = r#"
+commands:
+  - name: users
+    subcommands:
+      - name: list
+        method: GET
+        endpoint: /users
+        args:
+          - name: limit
+            long: limit
+            short: l
+            default: "10"
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+
+        // Should be able to use short arg
+        let matches = app.try_get_matches_from(["cli", "users", "list", "-l", "25"]).unwrap();
+        let (_, leaf) = collect_subcommand_path(&matches);
+        assert_eq!(leaf.get_one::<String>("limit"), Some(&"25".to_string()));
+    }
+
+    // ==================== leak_str tests ====================
+
+    #[test]
+    fn test_leak_str() {
+        let leaked = leak_str("test string");
+        assert_eq!(leaked, "test string");
+    }
+
+    #[test]
+    fn test_leak_str_from_string() {
+        let s = String::from("dynamic string");
+        let leaked = leak_str(s);
+        assert_eq!(leaked, "dynamic string");
+    }
+
+    // ==================== TreeNode tests ====================
+
+    #[test]
+    fn test_tree_node_default() {
+        let node = TreeNode::default();
+        assert!(node.children.is_empty());
+        assert!(node.args.is_empty());
+        assert!(node.about.is_none());
+    }
+
+    // ==================== print_manual_help tests ====================
+
+    #[test]
+    fn test_print_manual_help_with_about() {
+        let cmd = CommandSpec {
+            name: Some("list".to_string()),
+            about: Some("List all users".to_string()),
+            pattern: "users list".to_string(),
+            method: Some("GET".to_string()),
+            endpoint: Some("/users".to_string()),
+            body: None,
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: None,
+            multipart: false,
+            custom_handler: None,
+            args: vec![
+                ArgSpec {
+                    name: Some("limit".to_string()),
+                    long: Some("limit".to_string()),
+                    help: Some("Maximum results".to_string()),
+                    required: Some(false),
+                    ..Default::default()
+                },
+            ],
+            use_common_args: vec![],
+        };
+        // Just verify it doesn't panic
+        print_manual_help(&["users".to_string(), "list".to_string()], &cmd);
+    }
+
+    #[test]
+    fn test_print_manual_help_without_about() {
+        let cmd = CommandSpec {
+            name: Some("list".to_string()),
+            about: None,
+            pattern: "users list".to_string(),
+            method: Some("GET".to_string()),
+            endpoint: Some("/users".to_string()),
+            body: None,
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: None,
+            multipart: false,
+            custom_handler: None,
+            args: vec![],
+            use_common_args: vec![],
+        };
+        // Just verify it doesn't panic
+        print_manual_help(&["users".to_string(), "list".to_string()], &cmd);
+    }
+
+    #[test]
+    fn test_print_manual_help_with_required_arg() {
+        let cmd = CommandSpec {
+            name: Some("get".to_string()),
+            about: None,
+            pattern: "users get".to_string(),
+            method: Some("GET".to_string()),
+            endpoint: Some("/users/{id}".to_string()),
+            body: None,
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: None,
+            multipart: false,
+            custom_handler: None,
+            args: vec![
+                ArgSpec {
+                    name: Some("id".to_string()),
+                    long: Some("id".to_string()),
+                    help: Some("User ID".to_string()),
+                    required: Some(true),
+                    ..Default::default()
+                },
+            ],
+            use_common_args: vec![],
+        };
+        // Just verify it doesn't panic
+        print_manual_help(&["users".to_string(), "get".to_string()], &cmd);
+    }
+
+    // ==================== parse_timeout tests ====================
+
+    #[test]
+    fn test_parse_timeout_valid() {
+        let yaml = r#"
+commands:
+  - name: test
+    subcommands:
+      - name: cmd
+        method: GET
+        endpoint: /test
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+        let matches = app.try_get_matches_from(["cli", "--timeout", "60", "test", "cmd"]).unwrap();
+        let timeout = parse_timeout(&matches, "timeout");
+        assert_eq!(timeout, Some(60.0));
+    }
+
+    #[test]
+    fn test_parse_timeout_zero() {
+        let yaml = r#"
+commands:
+  - name: test
+    subcommands:
+      - name: cmd
+        method: GET
+        endpoint: /test
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+        let matches = app.try_get_matches_from(["cli", "--timeout", "0", "test", "cmd"]).unwrap();
+        let timeout = parse_timeout(&matches, "timeout");
+        assert_eq!(timeout, Some(0.0)); // Zero is valid
+    }
+
+    // ==================== collect_vars_from_matches edge cases ====================
+
+    #[test]
+    fn test_collect_vars_missing_required() {
+        // Test that missing required args are detected
+        let cmd = CommandSpec {
+            name: Some("get".to_string()),
+            about: None,
+            pattern: "users get".to_string(),
+            method: Some("GET".to_string()),
+            endpoint: Some("/users/{id}".to_string()),
+            body: None,
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: None,
+            multipart: false,
+            custom_handler: None,
+            args: vec![
+                ArgSpec {
+                    name: Some("id".to_string()),
+                    long: Some("id".to_string()),
+                    required: Some(true),
+                    ..Default::default()
+                },
+            ],
+            use_common_args: vec![],
+        };
+
+        // Build CLI with the arg defined but not required by clap
+        let yaml = r#"
+commands:
+  - name: users
+    subcommands:
+      - name: get
+        method: GET
+        endpoint: /users/{id}
+        args:
+          - name: id
+            long: id
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+        let matches = app.try_get_matches_from(["cli", "users", "get"]).unwrap();
+        let (_, leaf) = collect_subcommand_path(&matches);
+
+        let (_, _, missing) = collect_vars_from_matches(&cmd, leaf);
+        assert!(missing); // Required arg is missing
+    }
+
+    #[test]
+    fn test_collect_vars_bool_flag_set() {
+        let cmd = CommandSpec {
+            name: Some("list".to_string()),
+            about: None,
+            pattern: "users list".to_string(),
+            method: Some("GET".to_string()),
+            endpoint: Some("/users".to_string()),
+            body: None,
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: None,
+            multipart: false,
+            custom_handler: None,
+            args: vec![
+                ArgSpec {
+                    name: Some("verbose".to_string()),
+                    long: Some("verbose".to_string()),
+                    arg_type: Some("bool".to_string()),
+                    value: Some(ConditionalValue::Mapping {
+                        if_set: Some("true".to_string()),
+                        if_not_set: Some("false".to_string()),
+                    }),
+                    ..Default::default()
+                },
+            ],
+            use_common_args: vec![],
+        };
+
+        let yaml = r#"
+commands:
+  - name: users
+    subcommands:
+      - name: list
+        method: GET
+        endpoint: /users
+        args:
+          - name: verbose
+            long: verbose
+            type: bool
+            value:
+              if_set: "true"
+              if_not_set: "false"
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+        
+        // Test with flag set
+        let matches = app.clone().try_get_matches_from(["cli", "users", "list", "--verbose"]).unwrap();
+        let (_, leaf) = collect_subcommand_path(&matches);
+        let (vars, _, _) = collect_vars_from_matches(&cmd, leaf);
+        assert_eq!(vars.get("verbose"), Some(&"true".to_string()));
+
+        // Test without flag
+        let matches = app.try_get_matches_from(["cli", "users", "list"]).unwrap();
+        let (_, leaf) = collect_subcommand_path(&matches);
+        let (vars, _, _) = collect_vars_from_matches(&cmd, leaf);
+        assert_eq!(vars.get("verbose"), Some(&"false".to_string()));
+    }
+
+    #[test]
+    fn test_collect_vars_derives_from_pattern() {
+        // When args is empty, derive_args_from_pattern is used
+        let cmd = CommandSpec {
+            name: Some("get".to_string()),
+            about: None,
+            pattern: "users get {id}".to_string(),
+            method: Some("GET".to_string()),
+            endpoint: Some("/users/{id}".to_string()),
+            body: None,
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: None,
+            multipart: false,
+            custom_handler: None,
+            args: vec![], // Empty - will derive from pattern
+            use_common_args: vec![],
+        };
+
+        // Use flat spec with pattern which derives args automatically
+        let yaml = r#"
+commands:
+  - pattern: "users get {id}"
+    method: GET
+    endpoint: /users/{id}
+"#;
+        let flat = parse_flat_spec(yaml).unwrap();
+        let root = MappingRoot::Flat(flat);
+        let (app, _) = build_cli(&root, "https://api.example.com");
+        let matches = app.try_get_matches_from(["cli", "users", "get", "123"]).unwrap();
+        let (_, leaf) = collect_subcommand_path(&matches);
+
+        let (vars, _, _) = collect_vars_from_matches(&cmd, leaf);
+        assert_eq!(vars.get("id"), Some(&"123".to_string()));
+    }
+
+    // ==================== validate_handlers with flat spec ====================
+
+    #[test]
+    fn test_validate_handlers_flat_spec() {
+        let yaml = r#"
+commands:
+  - pattern: "export users"
+    custom_handler: export_users
+"#;
+        let flat = parse_flat_spec(yaml).unwrap();
+        let root = MappingRoot::Flat(flat);
+
+        let mut reg = HandlerRegistry::new();
+        reg.register("export_users", |_, _, _| Ok(()));
+
+        let result = validate_handlers(&root, &reg);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_handlers_flat_spec_missing() {
+        let yaml = r#"
+commands:
+  - pattern: "export users"
+    custom_handler: missing_handler
+"#;
+        let flat = parse_flat_spec(yaml).unwrap();
+        let root = MappingRoot::Flat(flat);
+        let reg = HandlerRegistry::new();
+
+        let result = validate_handlers(&root, &reg);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("missing_handler"));
+    }
+
+    // ==================== arg inheritance tests ====================
+
+    #[test]
+    fn test_arg_inheritance_from_common_args() {
+        let yaml = r#"
+commands:
+  - name: api
+    common_args:
+      output_format:
+        name: format
+        long: format
+        default: "json"
+        help: "Output format"
+    subcommands:
+      - name: call
+        method: GET
+        endpoint: /api
+        args:
+          - inherit: output_format
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, path_map) = build_cli(&root, "https://api.example.com");
+
+        let matches = app.try_get_matches_from(["cli", "api", "call", "--format", "xml"]).unwrap();
+        let (path, leaf) = collect_subcommand_path(&matches);
+        let cmd = path_map.get(&path).unwrap();
+        let (vars, _, _) = collect_vars_from_matches(cmd, leaf);
+
+        assert_eq!(vars.get("format"), Some(&"xml".to_string()));
+    }
+
+    // ==================== add_children_commands tests ====================
+
+    #[test]
+    fn test_add_children_commands_with_about() {
+        let yaml = r#"
+commands:
+  - name: users
+    about: "User management"
+    subcommands:
+      - name: list
+        about: "List all users"
+        method: GET
+        endpoint: /users
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+
+        let users_cmd = app.get_subcommands().find(|c| c.get_name() == "users");
+        assert!(users_cmd.is_some());
+        let users = users_cmd.unwrap();
+        assert!(users.get_about().is_some());
+    }
+
+    #[test]
+    fn test_add_children_commands_with_default_values() {
+        let yaml = r#"
+commands:
+  - name: users
+    subcommands:
+      - name: list
+        method: GET
+        endpoint: /users
+        args:
+          - name: limit
+            long: limit
+            default: "100"
+          - name: offset
+            long: offset
+            default: "0"
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+
+        // Verify defaults work
+        let matches = app.try_get_matches_from(["cli", "users", "list"]).unwrap();
+        let (_, leaf) = collect_subcommand_path(&matches);
+        assert_eq!(leaf.get_one::<String>("limit"), Some(&"100".to_string()));
+        assert_eq!(leaf.get_one::<String>("offset"), Some(&"0".to_string()));
+    }
+
+    // ==================== merge_arg_specs coverage ====================
+
+    #[test]
+    fn test_arg_inheritance_with_override() {
+        let yaml = r#"
+commands:
+  - name: api
+    common_args:
+      base_arg:
+        name: param
+        long: param
+        default: "default_value"
+        help: "Base help"
+        short: p
+    subcommands:
+      - name: call
+        method: GET
+        endpoint: /api
+        args:
+          - inherit: base_arg
+            default: "overridden_value"
+            help: "Overridden help"
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, path_map) = build_cli(&root, "https://api.example.com");
+
+        let matches = app.try_get_matches_from(["cli", "api", "call"]).unwrap();
+        let (path, leaf) = collect_subcommand_path(&matches);
+        let cmd = path_map.get(&path).unwrap();
+        let (vars, _, _) = collect_vars_from_matches(cmd, leaf);
+
+        // Should use overridden default
+        assert_eq!(vars.get("param"), Some(&"overridden_value".to_string()));
+    }
+
+    #[test]
+    fn test_arg_inheritance_missing_base() {
+        // When inherit references non-existent common_arg, use the arg as-is
+        let yaml = r#"
+commands:
+  - name: api
+    subcommands:
+      - name: call
+        method: GET
+        endpoint: /api
+        args:
+          - inherit: nonexistent
+            name: fallback
+            long: fallback
+            default: "fallback_value"
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, path_map) = build_cli(&root, "https://api.example.com");
+
+        let matches = app.try_get_matches_from(["cli", "api", "call"]).unwrap();
+        let (path, leaf) = collect_subcommand_path(&matches);
+        let cmd = path_map.get(&path).unwrap();
+        let (vars, _, _) = collect_vars_from_matches(cmd, leaf);
+
+        assert_eq!(vars.get("fallback"), Some(&"fallback_value".to_string()));
+    }
+
+    // ==================== use_common_args legacy support ====================
+
+    #[test]
+    fn test_use_common_args_legacy() {
+        let yaml = r#"
+commands:
+  - name: api
+    common_args:
+      verbose_arg:
+        name: verbose
+        long: verbose
+        type: bool
+        value:
+          if_set: "true"
+          if_not_set: "false"
+    subcommands:
+      - name: call
+        method: GET
+        endpoint: /api
+        use_common_args:
+          - verbose_arg
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, path_map) = build_cli(&root, "https://api.example.com");
+
+        let matches = app.try_get_matches_from(["cli", "api", "call", "--verbose"]).unwrap();
+        let (path, leaf) = collect_subcommand_path(&matches);
+        let cmd = path_map.get(&path).unwrap();
+        let (vars, _, _) = collect_vars_from_matches(cmd, leaf);
+
+        assert_eq!(vars.get("verbose"), Some(&"true".to_string()));
+    }
+
+    // ==================== command name derivation ====================
+
+    #[test]
+    fn test_command_name_from_pattern() {
+        // When name is not provided, derive from pattern
+        let yaml = r#"
+commands:
+  - name: users
+    subcommands:
+      - pattern: "users list-all"
+        method: GET
+        endpoint: /users
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (_, path_map) = build_cli(&root, "https://api.example.com");
+
+        // Should derive "list-all" from pattern
+        assert!(path_map.contains_key(&vec!["users".to_string(), "list-all".to_string()]));
+    }
+
+    // ==================== raw command tests ====================
+
+    #[test]
+    fn test_raw_command_exists() {
+        let yaml = r#"
+commands:
+  - name: test
+    subcommands:
+      - name: cmd
+        method: GET
+        endpoint: /test
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+
+        // Verify raw command exists
+        let raw_cmd = app.get_subcommands().find(|c| c.get_name() == "raw");
+        assert!(raw_cmd.is_some());
+    }
+
+    #[test]
+    fn test_raw_command_args() {
+        let yaml = r#"
+commands:
+  - name: test
+    subcommands:
+      - name: cmd
+        method: GET
+        endpoint: /test
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+
+        // Parse raw command - collect_subcommand_path stops at "raw"
+        let matches = app.try_get_matches_from([
+            "cli", "raw",
+            "--method", "POST",
+            "--endpoint", "/api/test",
+            "--header", "Content-Type: application/json",
+            "--body", r#"{"key": "value"}"#
+        ]).unwrap();
+
+        // raw subcommand is handled specially - verify we can get the subcommand
+        if let Some(("raw", raw_m)) = matches.subcommand() {
+            assert_eq!(raw_m.get_one::<String>("method"), Some(&"POST".to_string()));
+            assert_eq!(raw_m.get_one::<String>("endpoint"), Some(&"/api/test".to_string()));
+        } else {
+            panic!("Expected raw subcommand");
+        }
+    }
+
+    // ==================== global args tests ====================
+
+    #[test]
+    fn test_global_args_conn_timeout() {
+        let yaml = r#"
+commands:
+  - name: test
+    subcommands:
+      - name: cmd
+        method: GET
+        endpoint: /test
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+
+        let matches = app.try_get_matches_from(["cli", "--conn-timeout", "45", "test", "cmd"]).unwrap();
+        let timeout = parse_timeout(&matches, "conn-timeout");
+        assert_eq!(timeout, Some(45.0));
+    }
+
+    #[test]
+    fn test_global_args_json_output() {
+        let yaml = r#"
+commands:
+  - name: test
+    subcommands:
+      - name: cmd
+        method: GET
+        endpoint: /test
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+
+        let matches = app.try_get_matches_from(["cli", "--json-output", "test", "cmd"]).unwrap();
+        assert!(matches.get_flag("json-output"));
+    }
+
+    #[test]
+    fn test_global_args_verbose() {
+        let yaml = r#"
+commands:
+  - name: test
+    subcommands:
+      - name: cmd
+        method: GET
+        endpoint: /test
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+
+        let matches = app.try_get_matches_from(["cli", "-v", "test", "cmd"]).unwrap();
+        assert!(matches.get_flag("verbose"));
+    }
+
+    // ==================== perf test args ====================
+
+    #[test]
+    fn test_perf_args_count() {
+        let yaml = r#"
+commands:
+  - name: test
+    subcommands:
+      - name: cmd
+        method: GET
+        endpoint: /test
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+
+        let matches = app.try_get_matches_from(["cli", "--count", "100", "test", "cmd"]).unwrap();
+        assert_eq!(matches.get_one::<u32>("count"), Some(&100));
+    }
+
+    #[test]
+    fn test_perf_args_duration() {
+        let yaml = r#"
+commands:
+  - name: test
+    subcommands:
+      - name: cmd
+        method: GET
+        endpoint: /test
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+
+        let matches = app.try_get_matches_from(["cli", "--duration", "30", "test", "cmd"]).unwrap();
+        assert_eq!(matches.get_one::<u32>("duration"), Some(&30));
+    }
+
+    #[test]
+    fn test_perf_args_concurrency() {
+        let yaml = r#"
+commands:
+  - name: test
+    subcommands:
+      - name: cmd
+        method: GET
+        endpoint: /test
+"#;
+        let root = parse_mapping_root(yaml).unwrap();
+        let (app, _) = build_cli(&root, "https://api.example.com");
+
+        let matches = app.try_get_matches_from(["cli", "--concurrency", "4", "test", "cmd"]).unwrap();
+        assert_eq!(matches.get_one::<u32>("concurrency"), Some(&4));
     }
 }

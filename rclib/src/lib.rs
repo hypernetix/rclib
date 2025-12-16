@@ -1130,3 +1130,1741 @@ pub fn substitute_template(template: &str, vars: &HashMap<String, String>) -> St
 // Re-export useful types for consumers
 pub use openapiv3;
 pub use reqwest;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ==================== substitute_template tests ====================
+
+    #[test]
+    fn test_substitute_template_single_var() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), "John".to_string());
+        let result = substitute_template("Hello {name}!", &vars);
+        assert_eq!(result, "Hello John!");
+    }
+
+    #[test]
+    fn test_substitute_template_multiple_vars() {
+        let mut vars = HashMap::new();
+        vars.insert("first".to_string(), "John".to_string());
+        vars.insert("last".to_string(), "Doe".to_string());
+        let result = substitute_template("{first} {last}", &vars);
+        assert_eq!(result, "John Doe");
+    }
+
+    #[test]
+    fn test_substitute_template_missing_var() {
+        let vars = HashMap::new();
+        let result = substitute_template("Hello {name}!", &vars);
+        assert_eq!(result, "Hello !"); // Missing vars become empty
+    }
+
+    #[test]
+    fn test_substitute_template_no_placeholders() {
+        let vars = HashMap::new();
+        let result = substitute_template("Hello World!", &vars);
+        assert_eq!(result, "Hello World!");
+    }
+
+    #[test]
+    fn test_substitute_template_empty_template() {
+        let vars = HashMap::new();
+        let result = substitute_template("", &vars);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_substitute_template_repeated_var() {
+        let mut vars = HashMap::new();
+        vars.insert("x".to_string(), "A".to_string());
+        let result = substitute_template("{x}{x}{x}", &vars);
+        assert_eq!(result, "AAA");
+    }
+
+    #[test]
+    fn test_substitute_template_url_path() {
+        let mut vars = HashMap::new();
+        vars.insert("org".to_string(), "acme".to_string());
+        vars.insert("id".to_string(), "123".to_string());
+        let result = substitute_template("/orgs/{org}/users/{id}", &vars);
+        assert_eq!(result, "/orgs/acme/users/123");
+    }
+
+    #[test]
+    fn test_substitute_template_json_body() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), "Test".to_string());
+        vars.insert("value".to_string(), "42".to_string());
+        let template = r#"{"name": "{name}", "value": {value}}"#;
+        let result = substitute_template(template, &vars);
+        assert_eq!(result, r#"{"name": "Test", "value": 42}"#);
+    }
+
+    // ==================== ExecutionConfig tests ====================
+
+    #[test]
+    fn test_execution_config_new_defaults() {
+        let config = ExecutionConfig::new("test-agent/1.0");
+        assert_eq!(config.output, OutputFormat::Human);
+        assert_eq!(config.conn_timeout_secs, None);
+        assert_eq!(config.request_timeout_secs, None);
+        assert_eq!(config.user_agent, "test-agent/1.0");
+        assert!(!config.verbose);
+        assert_eq!(config.count, None);
+        assert_eq!(config.duration_secs, 0);
+        assert_eq!(config.concurrency, 1);
+    }
+
+    // ==================== OutputFormat tests ====================
+
+    #[test]
+    fn test_output_format_equality() {
+        assert_eq!(OutputFormat::Json, OutputFormat::Json);
+        assert_eq!(OutputFormat::Human, OutputFormat::Human);
+        assert_eq!(OutputFormat::Quiet, OutputFormat::Quiet);
+        assert_ne!(OutputFormat::Json, OutputFormat::Human);
+    }
+
+    // ==================== build_request_from_command tests ====================
+
+    #[test]
+    fn test_build_request_simple_get() {
+        let cmd = mapping::CommandSpec {
+            name: Some("list".to_string()),
+            about: None,
+            pattern: "users list".to_string(),
+            method: Some("GET".to_string()),
+            endpoint: Some("/users".to_string()),
+            body: None,
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: None,
+            multipart: false,
+            custom_handler: None,
+            args: vec![],
+            use_common_args: vec![],
+        };
+        let vars = HashMap::new();
+        let selected = HashSet::new();
+        let spec = build_request_from_command(Some("https://api.example.com".to_string()), &cmd, &vars, &selected);
+
+        if let RequestSpec::Simple(raw) = spec {
+            assert_eq!(raw.method, "GET");
+            assert_eq!(raw.endpoint, "/users");
+            assert_eq!(raw.base_url, Some("https://api.example.com".to_string()));
+        } else {
+            panic!("Expected RequestSpec::Simple");
+        }
+    }
+
+    #[test]
+    fn test_build_request_with_path_params() {
+        let cmd = mapping::CommandSpec {
+            name: Some("get".to_string()),
+            about: None,
+            pattern: "users get {id}".to_string(),
+            method: Some("GET".to_string()),
+            endpoint: Some("/users/{id}".to_string()),
+            body: None,
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: None,
+            multipart: false,
+            custom_handler: None,
+            args: vec![],
+            use_common_args: vec![],
+        };
+        let mut vars = HashMap::new();
+        vars.insert("id".to_string(), "123".to_string());
+        let selected = HashSet::new();
+        let spec = build_request_from_command(Some("https://api.example.com".to_string()), &cmd, &vars, &selected);
+
+        if let RequestSpec::Simple(raw) = spec {
+            assert_eq!(raw.endpoint, "/users/123");
+        } else {
+            panic!("Expected RequestSpec::Simple");
+        }
+    }
+
+    #[test]
+    fn test_build_request_with_body_template() {
+        let cmd = mapping::CommandSpec {
+            name: Some("create".to_string()),
+            about: None,
+            pattern: "users create".to_string(),
+            method: Some("POST".to_string()),
+            endpoint: Some("/users".to_string()),
+            body: Some(r#"{"name": "{name}", "email": "{email}"}"#.to_string()),
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: None,
+            multipart: false,
+            custom_handler: None,
+            args: vec![],
+            use_common_args: vec![],
+        };
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), "John".to_string());
+        vars.insert("email".to_string(), "john@example.com".to_string());
+        let selected = HashSet::new();
+        let spec = build_request_from_command(None, &cmd, &vars, &selected);
+
+        if let RequestSpec::Simple(raw) = spec {
+            assert_eq!(raw.body, Some(r#"{"name": "John", "email": "john@example.com"}"#.to_string()));
+        } else {
+            panic!("Expected RequestSpec::Simple");
+        }
+    }
+
+    #[test]
+    fn test_build_request_with_header_template() {
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".to_string(), "Bearer {token}".to_string());
+
+        let cmd = mapping::CommandSpec {
+            name: Some("get".to_string()),
+            about: None,
+            pattern: "api call".to_string(),
+            method: Some("GET".to_string()),
+            endpoint: Some("/api".to_string()),
+            body: None,
+            headers,
+            table_view: None,
+            scenario: None,
+            multipart: false,
+            custom_handler: None,
+            args: vec![],
+            use_common_args: vec![],
+        };
+        let mut vars = HashMap::new();
+        vars.insert("token".to_string(), "secret123".to_string());
+        let selected = HashSet::new();
+        let spec = build_request_from_command(None, &cmd, &vars, &selected);
+
+        if let RequestSpec::Simple(raw) = spec {
+            assert!(raw.headers.iter().any(|h| h.contains("Bearer secret123")));
+        } else {
+            panic!("Expected RequestSpec::Simple");
+        }
+    }
+
+    #[test]
+    fn test_build_request_custom_handler() {
+        let cmd = mapping::CommandSpec {
+            name: Some("export".to_string()),
+            about: None,
+            pattern: "export users".to_string(),
+            method: None,
+            endpoint: None,
+            body: None,
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: None,
+            multipart: false,
+            custom_handler: Some("export_users".to_string()),
+            args: vec![],
+            use_common_args: vec![],
+        };
+        let mut vars = HashMap::new();
+        vars.insert("format".to_string(), "csv".to_string());
+        let selected = HashSet::new();
+        let spec = build_request_from_command(None, &cmd, &vars, &selected);
+
+        if let RequestSpec::CustomHandler { handler_name, vars: handler_vars } = spec {
+            assert_eq!(handler_name, "export_users");
+            assert_eq!(handler_vars.get("format"), Some(&"csv".to_string()));
+            assert!(handler_vars.contains_key("uuid")); // Built-in variable added
+        } else {
+            panic!("Expected RequestSpec::CustomHandler");
+        }
+    }
+
+    #[test]
+    fn test_build_request_scenario() {
+        let scenario = mapping::Scenario {
+            scenario_type: "sequential".to_string(),
+            steps: vec![
+                mapping::ScenarioStep {
+                    name: "step1".to_string(),
+                    method: "POST".to_string(),
+                    endpoint: "/start".to_string(),
+                    body: None,
+                    headers: HashMap::new(),
+                    extract_response: HashMap::new(),
+                    polling: None,
+                },
+            ],
+        };
+
+        let cmd = mapping::CommandSpec {
+            name: Some("deploy".to_string()),
+            about: None,
+            pattern: "deploy".to_string(),
+            method: None,
+            endpoint: None,
+            body: None,
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: Some(scenario),
+            multipart: false,
+            custom_handler: None,
+            args: vec![],
+            use_common_args: vec![],
+        };
+        let vars = HashMap::new();
+        let selected = HashSet::new();
+        let spec = build_request_from_command(Some("https://api.example.com".to_string()), &cmd, &vars, &selected);
+
+        if let RequestSpec::Scenario(scenario_spec) = spec {
+            assert_eq!(scenario_spec.base_url, Some("https://api.example.com".to_string()));
+            assert_eq!(scenario_spec.scenario.steps.len(), 1);
+            assert!(scenario_spec.vars.contains_key("uuid")); // Built-in variable added
+        } else {
+            panic!("Expected RequestSpec::Scenario");
+        }
+    }
+
+    // ==================== parse_openapi tests ====================
+
+    #[test]
+    fn test_parse_openapi_yaml() {
+        let yaml = r#"
+openapi: "3.0.0"
+info:
+  title: Test API
+  version: "1.0"
+servers:
+  - url: https://api.example.com
+paths: {}
+"#;
+        let api = parse_openapi(yaml).unwrap();
+        assert_eq!(api.info.title, "Test API");
+        assert_eq!(api.servers.len(), 1);
+        assert_eq!(api.servers[0].url, "https://api.example.com");
+    }
+
+    #[test]
+    fn test_parse_openapi_json() {
+        let json = r#"{
+  "openapi": "3.0.0",
+  "info": {"title": "Test API", "version": "1.0"},
+  "servers": [{"url": "https://api.example.com"}],
+  "paths": {}
+}"#;
+        let api = parse_openapi(json).unwrap();
+        assert_eq!(api.info.title, "Test API");
+    }
+
+    #[test]
+    fn test_parse_openapi_invalid() {
+        let invalid = "not valid openapi";
+        let result = parse_openapi(invalid);
+        assert!(result.is_err());
+    }
+
+    // ==================== RawRequestSpec tests ====================
+
+    #[test]
+    fn test_raw_request_spec_defaults() {
+        let spec = RawRequestSpec {
+            base_url: None,
+            method: "GET".to_string(),
+            endpoint: "/test".to_string(),
+            headers: vec![],
+            body: None,
+            multipart: false,
+            file_fields: HashMap::new(),
+            table_view: None,
+        };
+        assert!(spec.base_url.is_none());
+        assert!(spec.headers.is_empty());
+        assert!(!spec.multipart);
+    }
+
+    // ==================== build_url tests ====================
+
+    #[test]
+    fn test_build_url_absolute_endpoint() {
+        let result = build_url(&None, "https://api.example.com/users");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "https://api.example.com/users");
+    }
+
+    #[test]
+    fn test_build_url_http_absolute() {
+        let result = build_url(&None, "http://localhost:8080/api");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "http://localhost:8080/api");
+    }
+
+    #[test]
+    fn test_build_url_relative_with_base() {
+        let result = build_url(&Some("https://api.example.com".to_string()), "/users");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "https://api.example.com/users");
+    }
+
+    #[test]
+    fn test_build_url_relative_no_base() {
+        let result = build_url(&None, "/users");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_url_base_with_trailing_slash() {
+        let result = build_url(&Some("https://api.example.com/".to_string()), "/users");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "https://api.example.com/users");
+    }
+
+    #[test]
+    fn test_build_url_no_slashes() {
+        let result = build_url(&Some("https://api.example.com".to_string()), "users");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "https://api.example.com/users");
+    }
+
+    // ==================== parse_method tests ====================
+
+    #[test]
+    fn test_parse_method_get() {
+        assert_eq!(parse_method("GET").unwrap(), Method::GET);
+        assert_eq!(parse_method("get").unwrap(), Method::GET);
+    }
+
+    #[test]
+    fn test_parse_method_post() {
+        assert_eq!(parse_method("POST").unwrap(), Method::POST);
+    }
+
+    #[test]
+    fn test_parse_method_put() {
+        assert_eq!(parse_method("PUT").unwrap(), Method::PUT);
+    }
+
+    #[test]
+    fn test_parse_method_patch() {
+        assert_eq!(parse_method("PATCH").unwrap(), Method::PATCH);
+    }
+
+    #[test]
+    fn test_parse_method_delete() {
+        assert_eq!(parse_method("DELETE").unwrap(), Method::DELETE);
+    }
+
+    #[test]
+    fn test_parse_method_head() {
+        assert_eq!(parse_method("HEAD").unwrap(), Method::HEAD);
+    }
+
+    #[test]
+    fn test_parse_method_options() {
+        assert_eq!(parse_method("OPTIONS").unwrap(), Method::OPTIONS);
+    }
+
+    #[test]
+    fn test_parse_method_invalid() {
+        let result = parse_method("INVALID");
+        assert!(result.is_err());
+    }
+
+    // ==================== parse_headers tests ====================
+
+    #[test]
+    fn test_parse_headers_valid() {
+        let headers = vec!["Content-Type: application/json".to_string()];
+        let result = parse_headers(&headers).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result.get("content-type").unwrap(), "application/json");
+    }
+
+    #[test]
+    fn test_parse_headers_multiple() {
+        let headers = vec![
+            "Content-Type: application/json".to_string(),
+            "Authorization: Bearer token123".to_string(),
+        ];
+        let result = parse_headers(&headers).unwrap();
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_headers_empty() {
+        let headers: Vec<String> = vec![];
+        let result = parse_headers(&headers).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_parse_headers_invalid_format() {
+        let headers = vec!["InvalidHeader".to_string()];
+        let result = parse_headers(&headers);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_headers_value_with_colon() {
+        let headers = vec!["X-Custom: value:with:colons".to_string()];
+        let result = parse_headers(&headers).unwrap();
+        assert_eq!(result.get("x-custom").unwrap(), "value:with:colons");
+    }
+
+    // ==================== scalar_to_string tests ====================
+
+    #[test]
+    fn test_scalar_to_string_null() {
+        assert_eq!(scalar_to_string(&serde_json::Value::Null), "null");
+    }
+
+    #[test]
+    fn test_scalar_to_string_bool() {
+        assert_eq!(scalar_to_string(&serde_json::json!(true)), "true");
+        assert_eq!(scalar_to_string(&serde_json::json!(false)), "false");
+    }
+
+    #[test]
+    fn test_scalar_to_string_number() {
+        assert_eq!(scalar_to_string(&serde_json::json!(42)), "42");
+        assert_eq!(scalar_to_string(&serde_json::json!(3.14)), "3.14");
+    }
+
+    #[test]
+    fn test_scalar_to_string_string() {
+        assert_eq!(scalar_to_string(&serde_json::json!("hello")), "hello");
+    }
+
+    #[test]
+    fn test_scalar_to_string_object() {
+        let obj = serde_json::json!({"key": "value"});
+        let result = scalar_to_string(&obj);
+        assert!(result.contains("key"));
+    }
+
+    // ==================== humanize_column_label tests ====================
+
+    #[test]
+    fn test_humanize_column_label_simple() {
+        assert_eq!(humanize_column_label("user_name"), "User Name");
+    }
+
+    #[test]
+    fn test_humanize_column_label_with_path() {
+        assert_eq!(humanize_column_label("user.first_name"), "First Name");
+    }
+
+    #[test]
+    fn test_humanize_column_label_dashes() {
+        assert_eq!(humanize_column_label("created-at"), "Created At");
+    }
+
+    #[test]
+    fn test_humanize_column_label_mixed() {
+        assert_eq!(humanize_column_label("user_id-value"), "User Id Value");
+    }
+
+    // ==================== parse_column_spec tests ====================
+
+    #[test]
+    fn test_parse_column_spec_simple() {
+        let spec = parse_column_spec("user_name");
+        assert_eq!(spec.path, "user_name");
+        assert!(spec.modifier.is_none());
+    }
+
+    #[test]
+    fn test_parse_column_spec_with_gb() {
+        let spec = parse_column_spec("size:gb");
+        assert_eq!(spec.path, "size");
+        assert!(matches!(spec.modifier, Some(SizeModifier::Gigabytes)));
+    }
+
+    #[test]
+    fn test_parse_column_spec_with_mb() {
+        let spec = parse_column_spec("size:mb");
+        assert_eq!(spec.path, "size");
+        assert!(matches!(spec.modifier, Some(SizeModifier::Megabytes)));
+    }
+
+    #[test]
+    fn test_parse_column_spec_with_kb() {
+        let spec = parse_column_spec("size:kb");
+        assert_eq!(spec.path, "size");
+        assert!(matches!(spec.modifier, Some(SizeModifier::Kilobytes)));
+    }
+
+    #[test]
+    fn test_parse_column_spec_unknown_modifier() {
+        let spec = parse_column_spec("size:unknown");
+        assert_eq!(spec.path, "size");
+        assert!(spec.modifier.is_none());
+    }
+
+    // ==================== get_value_by_path tests ====================
+
+    #[test]
+    fn test_get_value_by_path_simple() {
+        let json = serde_json::json!({"name": "John"});
+        let result = get_value_by_path(&json, "name");
+        assert_eq!(result, &serde_json::json!("John"));
+    }
+
+    #[test]
+    fn test_get_value_by_path_nested() {
+        let json = serde_json::json!({"user": {"name": "John"}});
+        let result = get_value_by_path(&json, "user.name");
+        assert_eq!(result, &serde_json::json!("John"));
+    }
+
+    #[test]
+    fn test_get_value_by_path_missing() {
+        let json = serde_json::json!({"name": "John"});
+        let result = get_value_by_path(&json, "missing");
+        assert_eq!(result, &serde_json::Value::Null);
+    }
+
+    #[test]
+    fn test_get_value_by_path_non_object() {
+        let json = serde_json::json!("string");
+        let result = get_value_by_path(&json, "field");
+        assert_eq!(result, &serde_json::Value::Null);
+    }
+
+    // ==================== scalar_to_string_with_modifier tests ====================
+
+    #[test]
+    fn test_scalar_to_string_with_modifier_gb() {
+        let bytes = serde_json::json!(1073741824); // 1 GB
+        let result = scalar_to_string_with_modifier(&bytes, &Some(SizeModifier::Gigabytes));
+        assert_eq!(result, "1.00");
+    }
+
+    #[test]
+    fn test_scalar_to_string_with_modifier_mb() {
+        let bytes = serde_json::json!(1048576); // 1 MB
+        let result = scalar_to_string_with_modifier(&bytes, &Some(SizeModifier::Megabytes));
+        assert_eq!(result, "1.00");
+    }
+
+    #[test]
+    fn test_scalar_to_string_with_modifier_kb() {
+        let bytes = serde_json::json!(1024); // 1 KB
+        let result = scalar_to_string_with_modifier(&bytes, &Some(SizeModifier::Kilobytes));
+        assert_eq!(result, "1.00");
+    }
+
+    #[test]
+    fn test_scalar_to_string_with_modifier_string_number() {
+        let bytes = serde_json::json!("1048576"); // 1 MB as string
+        let result = scalar_to_string_with_modifier(&bytes, &Some(SizeModifier::Megabytes));
+        assert_eq!(result, "1.00");
+    }
+
+    #[test]
+    fn test_scalar_to_string_with_modifier_non_numeric_string() {
+        let value = serde_json::json!("not a number");
+        let result = scalar_to_string_with_modifier(&value, &Some(SizeModifier::Megabytes));
+        assert_eq!(result, "not a number");
+    }
+
+    #[test]
+    fn test_scalar_to_string_with_modifier_none() {
+        let value = serde_json::json!(42);
+        let result = scalar_to_string_with_modifier(&value, &None);
+        assert_eq!(result, "42");
+    }
+
+    #[test]
+    fn test_scalar_to_string_with_modifier_null() {
+        let value = serde_json::Value::Null;
+        let result = scalar_to_string_with_modifier(&value, &Some(SizeModifier::Gigabytes));
+        assert_eq!(result, "null");
+    }
+
+    // ==================== humanize_column_label_with_modifier tests ====================
+
+    #[test]
+    fn test_humanize_column_label_with_modifier_gb() {
+        let result = humanize_column_label_with_modifier("disk_size", &Some(SizeModifier::Gigabytes));
+        assert!(result.contains("Disk Size"));
+        assert!(result.contains("GB"));
+    }
+
+    #[test]
+    fn test_humanize_column_label_with_modifier_mb() {
+        let result = humanize_column_label_with_modifier("memory", &Some(SizeModifier::Megabytes));
+        assert!(result.contains("Memory"));
+        assert!(result.contains("MB"));
+    }
+
+    #[test]
+    fn test_humanize_column_label_with_modifier_kb() {
+        let result = humanize_column_label_with_modifier("cache_size", &Some(SizeModifier::Kilobytes));
+        assert!(result.contains("Cache Size"));
+        assert!(result.contains("KB"));
+    }
+
+    #[test]
+    fn test_humanize_column_label_with_modifier_none() {
+        let result = humanize_column_label_with_modifier("user_name", &None);
+        assert_eq!(result, "User Name");
+    }
+
+    // ==================== apply_file_overrides tests ====================
+
+    #[test]
+    fn test_apply_file_overrides_no_file_args() {
+        let args = vec![
+            mapping::ArgSpec {
+                name: Some("name".to_string()),
+                arg_type: None,
+                ..Default::default()
+            },
+        ];
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), "John".to_string());
+        apply_file_overrides(&args, &mut vars);
+        assert_eq!(vars.get("name"), Some(&"John".to_string()));
+    }
+
+    #[test]
+    fn test_apply_file_overrides_file_arg_empty_path() {
+        let args = vec![
+            mapping::ArgSpec {
+                name: Some("config_file".to_string()),
+                arg_type: Some("file".to_string()),
+                file_overrides_value_of: Some("config".to_string()),
+                ..Default::default()
+            },
+        ];
+        let mut vars = HashMap::new();
+        vars.insert("config_file".to_string(), "".to_string());
+        apply_file_overrides(&args, &mut vars);
+        assert!(!vars.contains_key("config"));
+    }
+
+    #[test]
+    fn test_apply_file_overrides_missing_file() {
+        let args = vec![
+            mapping::ArgSpec {
+                name: Some("config_file".to_string()),
+                arg_type: Some("file".to_string()),
+                file_overrides_value_of: Some("config".to_string()),
+                ..Default::default()
+            },
+        ];
+        let mut vars = HashMap::new();
+        vars.insert("config_file".to_string(), "/nonexistent/path/file.txt".to_string());
+        apply_file_overrides(&args, &mut vars);
+        // Should not insert config since file doesn't exist
+        assert!(!vars.contains_key("config"));
+    }
+
+    // ==================== extract_jsonpath_value tests ====================
+
+    #[test]
+    fn test_extract_jsonpath_value_string() {
+        let json = serde_json::json!({"name": "John"});
+        let result = extract_jsonpath_value(&json, "$.name");
+        assert_eq!(result, Some("John".to_string()));
+    }
+
+    #[test]
+    fn test_extract_jsonpath_value_number() {
+        let json = serde_json::json!({"age": 30});
+        let result = extract_jsonpath_value(&json, "$.age");
+        assert_eq!(result, Some("30".to_string()));
+    }
+
+    #[test]
+    fn test_extract_jsonpath_value_bool() {
+        let json = serde_json::json!({"active": true});
+        let result = extract_jsonpath_value(&json, "$.active");
+        assert_eq!(result, Some("true".to_string()));
+    }
+
+    #[test]
+    fn test_extract_jsonpath_value_nested() {
+        let json = serde_json::json!({"user": {"id": 123}});
+        let result = extract_jsonpath_value(&json, "$.user.id");
+        assert_eq!(result, Some("123".to_string()));
+    }
+
+    #[test]
+    fn test_extract_jsonpath_value_missing() {
+        let json = serde_json::json!({"name": "John"});
+        let result = extract_jsonpath_value(&json, "$.missing");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_jsonpath_value_object() {
+        let json = serde_json::json!({"user": {"name": "John"}});
+        let result = extract_jsonpath_value(&json, "$.user");
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("John"));
+    }
+
+    // ==================== build_request_from_command edge cases ====================
+
+    #[test]
+    fn test_build_request_with_arg_overrides() {
+        let cmd = mapping::CommandSpec {
+            name: Some("test".to_string()),
+            about: None,
+            pattern: "test".to_string(),
+            method: Some("GET".to_string()),
+            endpoint: Some("/default".to_string()),
+            body: None,
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: None,
+            multipart: false,
+            custom_handler: None,
+            args: vec![
+                mapping::ArgSpec {
+                    name: Some("override_arg".to_string()),
+                    endpoint: Some("/overridden".to_string()),
+                    method: Some("POST".to_string()),
+                    ..Default::default()
+                },
+            ],
+            use_common_args: vec![],
+        };
+        let vars = HashMap::new();
+        let mut selected = HashSet::new();
+        selected.insert("override_arg".to_string());
+        let spec = build_request_from_command(Some("https://api.example.com".to_string()), &cmd, &vars, &selected);
+
+        if let RequestSpec::Simple(raw) = spec {
+            assert_eq!(raw.endpoint, "/overridden");
+            assert_eq!(raw.method, "POST");
+        } else {
+            panic!("Expected RequestSpec::Simple");
+        }
+    }
+
+    #[test]
+    fn test_build_request_multipart() {
+        let cmd = mapping::CommandSpec {
+            name: Some("upload".to_string()),
+            about: None,
+            pattern: "upload".to_string(),
+            method: Some("POST".to_string()),
+            endpoint: Some("/upload".to_string()),
+            body: None,
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: None,
+            multipart: true,
+            custom_handler: None,
+            args: vec![
+                mapping::ArgSpec {
+                    name: Some("file".to_string()),
+                    file_upload: true,
+                    ..Default::default()
+                },
+            ],
+            use_common_args: vec![],
+        };
+        let mut vars = HashMap::new();
+        vars.insert("file".to_string(), "/path/to/file.txt".to_string());
+        let selected = HashSet::new();
+        let spec = build_request_from_command(None, &cmd, &vars, &selected);
+
+        if let RequestSpec::Simple(raw) = spec {
+            assert!(raw.multipart);
+            assert!(raw.file_fields.contains_key("file"));
+        } else {
+            panic!("Expected RequestSpec::Simple");
+        }
+    }
+
+    // ==================== extract_response_variables tests ====================
+
+    #[test]
+    fn test_extract_response_variables_empty() {
+        let extractions = HashMap::new();
+        let mut vars = HashMap::new();
+        let result = extract_response_variables("{}", &extractions, &mut vars);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_extract_response_variables_success() {
+        let mut extractions = HashMap::new();
+        extractions.insert("user_id".to_string(), "$.id".to_string());
+        let mut vars = HashMap::new();
+        let result = extract_response_variables(r#"{"id": "123"}"#, &extractions, &mut vars);
+        assert!(result.is_ok());
+        assert_eq!(vars.get("user_id"), Some(&"123".to_string()));
+    }
+
+    #[test]
+    fn test_extract_response_variables_invalid_json() {
+        let mut extractions = HashMap::new();
+        extractions.insert("user_id".to_string(), "$.id".to_string());
+        let mut vars = HashMap::new();
+        let result = extract_response_variables("not json", &extractions, &mut vars);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_response_variables_missing_path() {
+        let mut extractions = HashMap::new();
+        extractions.insert("user_id".to_string(), "$.missing".to_string());
+        let mut vars = HashMap::new();
+        let result = extract_response_variables(r#"{"id": "123"}"#, &extractions, &mut vars);
+        assert!(result.is_err());
+    }
+
+    // ==================== build_raw_spec_from_step tests ====================
+
+    #[test]
+    fn test_build_raw_spec_from_step() {
+        let step = mapping::ScenarioStep {
+            name: "test_step".to_string(),
+            method: "POST".to_string(),
+            endpoint: "/api/{id}".to_string(),
+            body: Some(r#"{"name": "{name}"}"#.to_string()),
+            headers: HashMap::new(),
+            extract_response: HashMap::new(),
+            polling: None,
+        };
+        let mut vars = HashMap::new();
+        vars.insert("id".to_string(), "123".to_string());
+        vars.insert("name".to_string(), "Test".to_string());
+
+        let result = build_raw_spec_from_step(&Some("https://api.example.com".to_string()), &step, &vars);
+        assert!(result.is_ok());
+        let spec = result.unwrap();
+        assert_eq!(spec.method, "POST");
+        assert_eq!(spec.endpoint, "/api/123");
+        assert_eq!(spec.body, Some(r#"{"name": "Test"}"#.to_string()));
+    }
+
+    #[test]
+    fn test_build_raw_spec_from_step_with_headers() {
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".to_string(), "Bearer {token}".to_string());
+        let step = mapping::ScenarioStep {
+            name: "test_step".to_string(),
+            method: "GET".to_string(),
+            endpoint: "/api".to_string(),
+            body: None,
+            headers,
+            extract_response: HashMap::new(),
+            polling: None,
+        };
+        let mut vars = HashMap::new();
+        vars.insert("token".to_string(), "secret".to_string());
+
+        let result = build_raw_spec_from_step(&None, &step, &vars);
+        assert!(result.is_ok());
+        let spec = result.unwrap();
+        assert!(spec.headers.iter().any(|h| h.contains("Bearer secret")));
+    }
+
+    // ==================== print_human_readable tests ====================
+
+    #[test]
+    fn test_print_human_readable_object() {
+        let json = serde_json::json!({
+            "name": "John",
+            "age": 30,
+            "active": true
+        });
+        // Just verify it doesn't panic
+        print_human_readable(&json, None);
+    }
+
+    #[test]
+    fn test_print_human_readable_array() {
+        let json = serde_json::json!([
+            {"id": 1, "name": "Alice"},
+            {"id": 2, "name": "Bob"}
+        ]);
+        // Just verify it doesn't panic
+        print_human_readable(&json, None);
+    }
+
+    #[test]
+    fn test_print_human_readable_scalar() {
+        let json = serde_json::json!("simple string");
+        print_human_readable(&json, None);
+
+        let json = serde_json::json!(42);
+        print_human_readable(&json, None);
+
+        let json = serde_json::json!(true);
+        print_human_readable(&json, None);
+    }
+
+    #[test]
+    fn test_print_human_readable_object_with_nested_array() {
+        let json = serde_json::json!({
+            "total": 2,
+            "users": [
+                {"id": 1, "name": "Alice"},
+                {"id": 2, "name": "Bob"}
+            ]
+        });
+        print_human_readable(&json, None);
+    }
+
+    #[test]
+    fn test_print_human_readable_with_table_view() {
+        let json = serde_json::json!([
+            {"id": 1, "name": "Alice", "email": "alice@example.com"},
+            {"id": 2, "name": "Bob", "email": "bob@example.com"}
+        ]);
+        let table_view = vec!["id".to_string(), "name".to_string()];
+        print_human_readable(&json, Some(&table_view));
+    }
+
+    // ==================== print_array_table tests ====================
+
+    #[test]
+    fn test_print_array_table_empty() {
+        let arr: Vec<serde_json::Value> = vec![];
+        print_array_table(&arr, None);
+    }
+
+    #[test]
+    fn test_print_array_table_simple() {
+        let arr = vec![
+            serde_json::json!({"id": 1, "name": "Alice"}),
+            serde_json::json!({"id": 2, "name": "Bob"}),
+        ];
+        print_array_table(&arr, None);
+    }
+
+    #[test]
+    fn test_print_array_table_with_nested_objects() {
+        let arr = vec![
+            serde_json::json!({"id": 1, "user": {"name": "Alice"}}),
+            serde_json::json!({"id": 2, "user": {"name": "Bob"}}),
+        ];
+        print_array_table(&arr, None);
+    }
+
+    #[test]
+    fn test_print_array_table_with_column_spec() {
+        let arr = vec![
+            serde_json::json!({"id": 1, "name": "Alice", "size": 1073741824_i64}),
+            serde_json::json!({"id": 2, "name": "Bob", "size": 2147483648_i64}),
+        ];
+        let cols = vec!["id".to_string(), "name".to_string(), "size:gb".to_string()];
+        print_array_table(&arr, Some(&cols));
+    }
+
+    #[test]
+    fn test_print_array_table_scalars() {
+        let arr = vec![
+            serde_json::json!("item1"),
+            serde_json::json!("item2"),
+            serde_json::json!("item3"),
+        ];
+        print_array_table(&arr, None);
+    }
+
+    // ==================== RequestSpec tests ====================
+
+    #[test]
+    fn test_request_spec_simple_clone() {
+        let spec = RequestSpec::Simple(RawRequestSpec {
+            base_url: Some("https://api.example.com".to_string()),
+            method: "GET".to_string(),
+            endpoint: "/users".to_string(),
+            headers: vec!["Content-Type: application/json".to_string()],
+            body: None,
+            multipart: false,
+            file_fields: HashMap::new(),
+            table_view: None,
+        });
+        let cloned = spec.clone();
+        if let RequestSpec::Simple(raw) = cloned {
+            assert_eq!(raw.method, "GET");
+        }
+    }
+
+    #[test]
+    fn test_request_spec_scenario_clone() {
+        let scenario = mapping::Scenario {
+            scenario_type: "sequential".to_string(),
+            steps: vec![],
+        };
+        let spec = RequestSpec::Scenario(ScenarioSpec {
+            base_url: Some("https://api.example.com".to_string()),
+            scenario,
+            vars: HashMap::new(),
+        });
+        let cloned = spec.clone();
+        assert!(matches!(cloned, RequestSpec::Scenario(_)));
+    }
+
+    #[test]
+    fn test_request_spec_custom_handler_clone() {
+        let mut vars = HashMap::new();
+        vars.insert("key".to_string(), "value".to_string());
+        let spec = RequestSpec::CustomHandler {
+            handler_name: "test_handler".to_string(),
+            vars,
+        };
+        let cloned = spec.clone();
+        if let RequestSpec::CustomHandler { handler_name, vars } = cloned {
+            assert_eq!(handler_name, "test_handler");
+            assert_eq!(vars.get("key"), Some(&"value".to_string()));
+        }
+    }
+
+    // ==================== ScenarioSpec tests ====================
+
+    #[test]
+    fn test_scenario_spec_debug() {
+        let scenario = mapping::Scenario {
+            scenario_type: "job_with_polling".to_string(),
+            steps: vec![],
+        };
+        let spec = ScenarioSpec {
+            base_url: Some("https://api.example.com".to_string()),
+            scenario,
+            vars: HashMap::new(),
+        };
+        let debug_str = format!("{:?}", spec);
+        assert!(debug_str.contains("ScenarioSpec"));
+    }
+
+    // ==================== ExecutionConfig tests ====================
+
+    #[test]
+    fn test_execution_config_clone() {
+        let config = ExecutionConfig::new("test-agent");
+        let cloned = config.clone();
+        assert_eq!(cloned.user_agent, "test-agent");
+    }
+
+    #[test]
+    fn test_execution_config_debug() {
+        let config = ExecutionConfig::new("test-agent");
+        let debug_str = format!("{:?}", config);
+        assert!(debug_str.contains("ExecutionConfig"));
+    }
+
+    // ==================== build_request_from_command with header overrides ====================
+
+    #[test]
+    fn test_build_request_with_arg_header_override() {
+        let mut arg_headers = HashMap::new();
+        arg_headers.insert("X-Custom".to_string(), "custom-value".to_string());
+
+        let cmd = mapping::CommandSpec {
+            name: Some("test".to_string()),
+            about: None,
+            pattern: "test".to_string(),
+            method: Some("GET".to_string()),
+            endpoint: Some("/test".to_string()),
+            body: None,
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: None,
+            multipart: false,
+            custom_handler: None,
+            args: vec![
+                mapping::ArgSpec {
+                    name: Some("custom_arg".to_string()),
+                    headers: Some(arg_headers),
+                    body: Some(r#"{"override": true}"#.to_string()),
+                    ..Default::default()
+                },
+            ],
+            use_common_args: vec![],
+        };
+        let vars = HashMap::new();
+        let mut selected = HashSet::new();
+        selected.insert("custom_arg".to_string());
+        let spec = build_request_from_command(Some("https://api.example.com".to_string()), &cmd, &vars, &selected);
+
+        if let RequestSpec::Simple(raw) = spec {
+            assert!(raw.headers.iter().any(|h| h.contains("X-Custom")));
+            assert_eq!(raw.body, Some(r#"{"override": true}"#.to_string()));
+        } else {
+            panic!("Expected RequestSpec::Simple");
+        }
+    }
+
+    // ==================== apply_file_overrides with real file ====================
+
+    #[test]
+    fn test_apply_file_overrides_with_real_file() {
+        use std::io::Write;
+        
+        // Create a temp file
+        let temp_dir = std::env::temp_dir();
+        let temp_file = temp_dir.join("rclib_test_file.txt");
+        let mut file = std::fs::File::create(&temp_file).unwrap();
+        writeln!(file, "file content here").unwrap();
+        drop(file);
+
+        let args = vec![
+            mapping::ArgSpec {
+                name: Some("config_file".to_string()),
+                arg_type: Some("file".to_string()),
+                file_overrides_value_of: Some("config".to_string()),
+                ..Default::default()
+            },
+        ];
+        let mut vars = HashMap::new();
+        vars.insert("config_file".to_string(), temp_file.to_string_lossy().to_string());
+        
+        apply_file_overrides(&args, &mut vars);
+        
+        assert!(vars.contains_key("config"));
+        assert!(vars.get("config").unwrap().contains("file content here"));
+
+        // Cleanup
+        let _ = std::fs::remove_file(temp_file);
+    }
+
+    // ==================== OutputFormat tests ====================
+
+    #[test]
+    fn test_output_format_debug() {
+        let format = OutputFormat::Json;
+        let debug_str = format!("{:?}", format);
+        assert!(debug_str.contains("Json"));
+    }
+
+    #[test]
+    fn test_output_format_clone() {
+        let format = OutputFormat::Human;
+        let cloned = format.clone();
+        assert_eq!(cloned, OutputFormat::Human);
+    }
+
+    #[test]
+    fn test_output_format_copy() {
+        let format = OutputFormat::Quiet;
+        let copied: OutputFormat = format;
+        assert_eq!(copied, OutputFormat::Quiet);
+    }
+
+    // ==================== RawRequestSpec tests ====================
+
+    #[test]
+    fn test_raw_request_spec_clone() {
+        let spec = RawRequestSpec {
+            base_url: Some("https://api.example.com".to_string()),
+            method: "POST".to_string(),
+            endpoint: "/users".to_string(),
+            headers: vec!["Content-Type: application/json".to_string()],
+            body: Some(r#"{"name": "test"}"#.to_string()),
+            multipart: false,
+            file_fields: HashMap::new(),
+            table_view: Some(vec!["id".to_string(), "name".to_string()]),
+        };
+        let cloned = spec.clone();
+        assert_eq!(cloned.method, "POST");
+        assert_eq!(cloned.body, Some(r#"{"name": "test"}"#.to_string()));
+        assert!(cloned.table_view.is_some());
+    }
+
+    #[test]
+    fn test_raw_request_spec_debug() {
+        let spec = RawRequestSpec {
+            base_url: None,
+            method: "GET".to_string(),
+            endpoint: "/test".to_string(),
+            headers: vec![],
+            body: None,
+            multipart: false,
+            file_fields: HashMap::new(),
+            table_view: None,
+        };
+        let debug_str = format!("{:?}", spec);
+        assert!(debug_str.contains("RawRequestSpec"));
+        assert!(debug_str.contains("GET"));
+    }
+
+    // ==================== build_request edge cases ====================
+
+    #[test]
+    fn test_build_request_with_table_view() {
+        let cmd = mapping::CommandSpec {
+            name: Some("list".to_string()),
+            about: None,
+            pattern: "users list".to_string(),
+            method: Some("GET".to_string()),
+            endpoint: Some("/users".to_string()),
+            body: None,
+            headers: HashMap::new(),
+            table_view: Some(vec!["id".to_string(), "name".to_string(), "email".to_string()]),
+            scenario: None,
+            multipart: false,
+            custom_handler: None,
+            args: vec![],
+            use_common_args: vec![],
+        };
+        let vars = HashMap::new();
+        let selected = HashSet::new();
+        let spec = build_request_from_command(None, &cmd, &vars, &selected);
+
+        if let RequestSpec::Simple(raw) = spec {
+            assert!(raw.table_view.is_some());
+            let tv = raw.table_view.unwrap();
+            assert_eq!(tv.len(), 3);
+            assert!(tv.contains(&"id".to_string()));
+        } else {
+            panic!("Expected RequestSpec::Simple");
+        }
+    }
+
+    #[test]
+    fn test_build_request_multipart_without_file_upload() {
+        // Multipart true but no file_upload args
+        let cmd = mapping::CommandSpec {
+            name: Some("upload".to_string()),
+            about: None,
+            pattern: "upload".to_string(),
+            method: Some("POST".to_string()),
+            endpoint: Some("/upload".to_string()),
+            body: None,
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: None,
+            multipart: true,
+            custom_handler: None,
+            args: vec![
+                mapping::ArgSpec {
+                    name: Some("description".to_string()),
+                    file_upload: false, // Not a file upload
+                    ..Default::default()
+                },
+            ],
+            use_common_args: vec![],
+        };
+        let mut vars = HashMap::new();
+        vars.insert("description".to_string(), "test description".to_string());
+        let selected = HashSet::new();
+        let spec = build_request_from_command(None, &cmd, &vars, &selected);
+
+        if let RequestSpec::Simple(raw) = spec {
+            assert!(raw.multipart);
+            assert!(raw.file_fields.is_empty()); // No file fields
+        } else {
+            panic!("Expected RequestSpec::Simple");
+        }
+    }
+
+    // ==================== Scenario edge cases ====================
+
+    #[test]
+    fn test_build_request_scenario_with_vars() {
+        let scenario = mapping::Scenario {
+            scenario_type: "job_with_polling".to_string(),
+            steps: vec![
+                mapping::ScenarioStep {
+                    name: "schedule_job".to_string(),
+                    method: "POST".to_string(),
+                    endpoint: "/jobs".to_string(),
+                    body: Some(r#"{"name": "{job_name}"}"#.to_string()),
+                    headers: HashMap::new(),
+                    extract_response: HashMap::new(),
+                    polling: None,
+                },
+                mapping::ScenarioStep {
+                    name: "poll_job".to_string(),
+                    method: "GET".to_string(),
+                    endpoint: "/jobs/{job_id}".to_string(),
+                    body: None,
+                    headers: HashMap::new(),
+                    extract_response: HashMap::new(),
+                    polling: Some(mapping::PollingConfig {
+                        interval_seconds: 5,
+                        timeout_seconds: 300,
+                        completion_conditions: vec![],
+                    }),
+                },
+            ],
+        };
+
+        let cmd = mapping::CommandSpec {
+            name: Some("run_job".to_string()),
+            about: None,
+            pattern: "run job".to_string(),
+            method: None,
+            endpoint: None,
+            body: None,
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: Some(scenario),
+            multipart: false,
+            custom_handler: None,
+            args: vec![],
+            use_common_args: vec![],
+        };
+        let mut vars = HashMap::new();
+        vars.insert("job_name".to_string(), "test_job".to_string());
+        let selected = HashSet::new();
+        let spec = build_request_from_command(Some("https://api.example.com".to_string()), &cmd, &vars, &selected);
+
+        if let RequestSpec::Scenario(scenario_spec) = spec {
+            assert_eq!(scenario_spec.scenario.scenario_type, "job_with_polling");
+            assert_eq!(scenario_spec.scenario.steps.len(), 2);
+            assert!(scenario_spec.vars.contains_key("job_name"));
+            assert!(scenario_spec.vars.contains_key("uuid")); // Built-in
+        } else {
+            panic!("Expected RequestSpec::Scenario");
+        }
+    }
+
+    // ==================== Custom handler edge cases ====================
+
+    #[test]
+    fn test_build_request_custom_handler_with_file_override() {
+        use std::io::Write;
+        
+        // Create a temp file
+        let temp_dir = std::env::temp_dir();
+        let temp_file = temp_dir.join("rclib_handler_test.txt");
+        let mut file = std::fs::File::create(&temp_file).unwrap();
+        writeln!(file, "handler file content").unwrap();
+        drop(file);
+
+        let cmd = mapping::CommandSpec {
+            name: Some("process".to_string()),
+            about: None,
+            pattern: "process".to_string(),
+            method: None,
+            endpoint: None,
+            body: None,
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: None,
+            multipart: false,
+            custom_handler: Some("process_handler".to_string()),
+            args: vec![
+                mapping::ArgSpec {
+                    name: Some("input_file".to_string()),
+                    arg_type: Some("file".to_string()),
+                    file_overrides_value_of: Some("input_content".to_string()),
+                    ..Default::default()
+                },
+            ],
+            use_common_args: vec![],
+        };
+        let mut vars = HashMap::new();
+        vars.insert("input_file".to_string(), temp_file.to_string_lossy().to_string());
+        let selected = HashSet::new();
+        let spec = build_request_from_command(None, &cmd, &vars, &selected);
+
+        if let RequestSpec::CustomHandler { handler_name, vars: handler_vars } = spec {
+            assert_eq!(handler_name, "process_handler");
+            assert!(handler_vars.contains_key("input_content"));
+            assert!(handler_vars.get("input_content").unwrap().contains("handler file content"));
+        } else {
+            panic!("Expected RequestSpec::CustomHandler");
+        }
+
+        // Cleanup
+        let _ = std::fs::remove_file(temp_file);
+    }
+
+    // ==================== ExecutionResult tests ====================
+
+    #[test]
+    fn test_execution_result_debug() {
+        let result = ExecutionResult {
+            duration: std::time::Duration::from_millis(100),
+            is_success: true,
+        };
+        let debug_str = format!("{:?}", result);
+        assert!(debug_str.contains("ExecutionResult"));
+        assert!(debug_str.contains("100"));
+    }
+
+    #[test]
+    fn test_execution_result_clone() {
+        let result = ExecutionResult {
+            duration: std::time::Duration::from_secs(1),
+            is_success: false,
+        };
+        let cloned = result.clone();
+        assert_eq!(cloned.is_success, false);
+        assert_eq!(cloned.duration.as_secs(), 1);
+    }
+
+    // ==================== ColumnSpec tests ====================
+
+    #[test]
+    fn test_column_spec_debug() {
+        let spec = ColumnSpec {
+            path: "user.name".to_string(),
+            modifier: Some(SizeModifier::Megabytes),
+        };
+        let debug_str = format!("{:?}", spec);
+        assert!(debug_str.contains("ColumnSpec"));
+        assert!(debug_str.contains("user.name"));
+    }
+
+    #[test]
+    fn test_column_spec_clone() {
+        let spec = ColumnSpec {
+            path: "size".to_string(),
+            modifier: Some(SizeModifier::Gigabytes),
+        };
+        let cloned = spec.clone();
+        assert_eq!(cloned.path, "size");
+        assert!(matches!(cloned.modifier, Some(SizeModifier::Gigabytes)));
+    }
+
+    // ==================== SizeModifier tests ====================
+
+    #[test]
+    fn test_size_modifier_debug() {
+        let gb = SizeModifier::Gigabytes;
+        let mb = SizeModifier::Megabytes;
+        let kb = SizeModifier::Kilobytes;
+        
+        assert!(format!("{:?}", gb).contains("Gigabytes"));
+        assert!(format!("{:?}", mb).contains("Megabytes"));
+        assert!(format!("{:?}", kb).contains("Kilobytes"));
+    }
+
+    #[test]
+    fn test_size_modifier_clone() {
+        let modifier = SizeModifier::Kilobytes;
+        let cloned = modifier.clone();
+        assert!(matches!(cloned, SizeModifier::Kilobytes));
+    }
+
+    // ==================== build_request with file overrides in simple request ====================
+
+    #[test]
+    fn test_build_request_simple_with_file_override() {
+        use std::io::Write;
+        
+        // Create a temp file
+        let temp_dir = std::env::temp_dir();
+        let temp_file = temp_dir.join("rclib_simple_test.json");
+        let mut file = std::fs::File::create(&temp_file).unwrap();
+        writeln!(file, r#"{{"data": "from file"}}"#).unwrap();
+        drop(file);
+
+        let cmd = mapping::CommandSpec {
+            name: Some("create".to_string()),
+            about: None,
+            pattern: "create".to_string(),
+            method: Some("POST".to_string()),
+            endpoint: Some("/items".to_string()),
+            body: Some("{body}".to_string()),
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: None,
+            multipart: false,
+            custom_handler: None,
+            args: vec![
+                mapping::ArgSpec {
+                    name: Some("body_file".to_string()),
+                    arg_type: Some("file".to_string()),
+                    file_overrides_value_of: Some("body".to_string()),
+                    ..Default::default()
+                },
+            ],
+            use_common_args: vec![],
+        };
+        let mut vars = HashMap::new();
+        vars.insert("body_file".to_string(), temp_file.to_string_lossy().to_string());
+        let selected = HashSet::new();
+        let spec = build_request_from_command(Some("https://api.example.com".to_string()), &cmd, &vars, &selected);
+
+        if let RequestSpec::Simple(raw) = spec {
+            assert!(raw.body.is_some());
+            assert!(raw.body.unwrap().contains("from file"));
+        } else {
+            panic!("Expected RequestSpec::Simple");
+        }
+
+        // Cleanup
+        let _ = std::fs::remove_file(temp_file);
+    }
+
+    // ==================== build_request with scenario file overrides ====================
+
+    #[test]
+    fn test_build_request_scenario_with_file_override() {
+        use std::io::Write;
+        
+        // Create a temp file
+        let temp_dir = std::env::temp_dir();
+        let temp_file = temp_dir.join("rclib_scenario_test.json");
+        let mut file = std::fs::File::create(&temp_file).unwrap();
+        writeln!(file, r#"scenario config content"#).unwrap();
+        drop(file);
+
+        let scenario = mapping::Scenario {
+            scenario_type: "job_with_polling".to_string(),
+            steps: vec![
+                mapping::ScenarioStep {
+                    name: "schedule_job".to_string(),
+                    method: "POST".to_string(),
+                    endpoint: "/jobs".to_string(),
+                    body: Some("{config}".to_string()),
+                    headers: HashMap::new(),
+                    extract_response: HashMap::new(),
+                    polling: None,
+                },
+                mapping::ScenarioStep {
+                    name: "poll_job".to_string(),
+                    method: "GET".to_string(),
+                    endpoint: "/jobs/{job_id}".to_string(),
+                    body: None,
+                    headers: HashMap::new(),
+                    extract_response: HashMap::new(),
+                    polling: Some(mapping::PollingConfig {
+                        interval_seconds: 1,
+                        timeout_seconds: 10,
+                        completion_conditions: vec![],
+                    }),
+                },
+            ],
+        };
+
+        let cmd = mapping::CommandSpec {
+            name: Some("run".to_string()),
+            about: None,
+            pattern: "run".to_string(),
+            method: None,
+            endpoint: None,
+            body: None,
+            headers: HashMap::new(),
+            table_view: None,
+            scenario: Some(scenario),
+            multipart: false,
+            custom_handler: None,
+            args: vec![
+                mapping::ArgSpec {
+                    name: Some("config_file".to_string()),
+                    arg_type: Some("file".to_string()),
+                    file_overrides_value_of: Some("config".to_string()),
+                    ..Default::default()
+                },
+            ],
+            use_common_args: vec![],
+        };
+        let mut vars = HashMap::new();
+        vars.insert("config_file".to_string(), temp_file.to_string_lossy().to_string());
+        let selected = HashSet::new();
+        let spec = build_request_from_command(Some("https://api.example.com".to_string()), &cmd, &vars, &selected);
+
+        if let RequestSpec::Scenario(scenario_spec) = spec {
+            assert!(scenario_spec.vars.contains_key("config"));
+            assert!(scenario_spec.vars.get("config").unwrap().contains("scenario config content"));
+        } else {
+            panic!("Expected RequestSpec::Scenario");
+        }
+
+        // Cleanup
+        let _ = std::fs::remove_file(temp_file);
+    }
+
+    // ==================== humanize_column_label edge cases ====================
+
+    #[test]
+    fn test_humanize_column_label_empty() {
+        let result = humanize_column_label("");
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_humanize_column_label_single_char() {
+        let result = humanize_column_label("x");
+        assert_eq!(result, "X");
+    }
+
+    #[test]
+    fn test_humanize_column_label_all_uppercase() {
+        let result = humanize_column_label("USER_ID");
+        assert_eq!(result, "User Id");
+    }
+
+    // ==================== get_value_by_path edge cases ====================
+
+    #[test]
+    fn test_get_value_by_path_deeply_nested() {
+        let json = serde_json::json!({
+            "level1": {
+                "level2": {
+                    "level3": {
+                        "value": "deep"
+                    }
+                }
+            }
+        });
+        let result = get_value_by_path(&json, "level1.level2.level3.value");
+        assert_eq!(result, &serde_json::json!("deep"));
+    }
+
+    #[test]
+    fn test_get_value_by_path_array_value() {
+        let json = serde_json::json!({
+            "items": [1, 2, 3]
+        });
+        let result = get_value_by_path(&json, "items");
+        assert!(result.is_array());
+    }
+
+    // ==================== print_array_table edge cases ====================
+
+    #[test]
+    fn test_print_array_table_mixed_types() {
+        let arr = vec![
+            serde_json::json!({"id": 1, "value": "string"}),
+            serde_json::json!({"id": 2, "value": 42}),
+            serde_json::json!({"id": 3, "value": true}),
+            serde_json::json!({"id": 4, "value": null}),
+        ];
+        print_array_table(&arr, None);
+    }
+
+    #[test]
+    fn test_print_array_table_with_all_modifiers() {
+        let arr = vec![
+            serde_json::json!({"gb": 1073741824_i64, "mb": 1048576_i64, "kb": 1024_i64}),
+        ];
+        let cols = vec!["gb:gb".to_string(), "mb:mb".to_string(), "kb:kb".to_string()];
+        print_array_table(&arr, Some(&cols));
+    }
+
+    // ==================== substitute_template edge cases ====================
+
+    #[test]
+    fn test_substitute_template_special_chars() {
+        let mut vars = HashMap::new();
+        vars.insert("query".to_string(), "hello world".to_string());
+        let result = substitute_template("/search?q={query}", &vars);
+        assert_eq!(result, "/search?q=hello world");
+    }
+
+    #[test]
+    fn test_substitute_template_underscore_var() {
+        let mut vars = HashMap::new();
+        vars.insert("user_id".to_string(), "123".to_string());
+        vars.insert("org_name".to_string(), "acme".to_string());
+        let result = substitute_template("/orgs/{org_name}/users/{user_id}", &vars);
+        assert_eq!(result, "/orgs/acme/users/123");
+    }
+
+    #[test]
+    fn test_substitute_template_numeric_suffix() {
+        let mut vars = HashMap::new();
+        vars.insert("param1".to_string(), "a".to_string());
+        vars.insert("param2".to_string(), "b".to_string());
+        let result = substitute_template("{param1}-{param2}", &vars);
+        assert_eq!(result, "a-b");
+    }
+}
+
+// HTTP tests require a running mock server - moved to integration tests
+// to avoid async/blocking conflicts with the blocking reqwest client

@@ -19,3 +19,7 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 once_cell = { workspace = true }
 uuid = { workspace = true }
+
+[dev-dependencies]
+wiremock = "0.6"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
