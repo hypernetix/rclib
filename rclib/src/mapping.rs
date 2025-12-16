@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlatSpec {
@@ -209,8 +209,8 @@ impl<'de> serde::Deserialize<'de> for CommandNode {
             });
 
             if has_subcommands {
-                let group: CommandGroup = serde_yaml::from_value(value)
-                    .map_err(serde::de::Error::custom)?;
+                let group: CommandGroup =
+                    serde_yaml::from_value(value).map_err(serde::de::Error::custom)?;
                 return Ok(CommandNode::Group(group));
             }
 
@@ -224,15 +224,15 @@ impl<'de> serde::Deserialize<'de> for CommandNode {
             });
 
             if has_command_fields {
-                let command: CommandSpec = serde_yaml::from_value(value)
-                    .map_err(serde::de::Error::custom)?;
+                let command: CommandSpec =
+                    serde_yaml::from_value(value).map_err(serde::de::Error::custom)?;
                 return Ok(CommandNode::Command(command));
             }
         }
 
         // Default to Command for backward compatibility
-        let command: CommandSpec = serde_yaml::from_value(value)
-            .map_err(serde::de::Error::custom)?;
+        let command: CommandSpec =
+            serde_yaml::from_value(value).map_err(serde::de::Error::custom)?;
         Ok(CommandNode::Command(command))
     }
 }
@@ -253,7 +253,8 @@ pub fn parse_mapping_root(yaml: &str) -> Result<MappingRoot> {
     // Peek to see if this is hierarchical (has top-level 'commands')
     let val: serde_yaml::Value = serde_yaml::from_str(yaml).context("Invalid YAML")?;
     if val.get("commands").is_some() {
-        let spec: HierSpec = serde_yaml::from_value(val).context("Failed to parse hierarchical mapping")?;
+        let spec: HierSpec =
+            serde_yaml::from_value(val).context("Failed to parse hierarchical mapping")?;
         Ok(MappingRoot::Hier(spec))
     } else {
         let spec: FlatSpec = serde_yaml::from_str(yaml).context("Failed to parse flat mapping")?;
@@ -269,25 +270,28 @@ pub fn derive_args_from_pattern(pattern: &str) -> Vec<ArgSpec> {
     let mut args: Vec<ArgSpec> = Vec::new();
     for tok in pattern.split_whitespace() {
         if is_placeholder(tok) {
-            let name = tok.trim_start_matches('{').trim_end_matches('}').to_string();
-                            args.push(ArgSpec {
-                    name: Some(name.clone()),
-                    help: None,
-                    positional: Some(true),
-                    long: Some(name),
-                    short: None,
-                    required: Some(true),
-                    default: None,
-                    arg_type: None,
-                    value: None,
-                    file_upload: false,
-                    file_overrides_value_of: None,
-                    inherit: None,
-                    endpoint: None,
-                    method: None,
-                    headers: None,
-                    body: None,
-                });
+            let name = tok
+                .trim_start_matches('{')
+                .trim_end_matches('}')
+                .to_string();
+            args.push(ArgSpec {
+                name: Some(name.clone()),
+                help: None,
+                positional: Some(true),
+                long: Some(name),
+                short: None,
+                required: Some(true),
+                default: None,
+                arg_type: None,
+                value: None,
+                file_upload: false,
+                file_overrides_value_of: None,
+                inherit: None,
+                endpoint: None,
+                method: None,
+                headers: None,
+                body: None,
+            });
         }
     }
     args
@@ -428,7 +432,10 @@ commands:
         default: json
 "#;
         let spec = parse_flat_spec(yaml).unwrap();
-        assert_eq!(spec.commands[0].custom_handler, Some("export_users".to_string()));
+        assert_eq!(
+            spec.commands[0].custom_handler,
+            Some("export_users".to_string())
+        );
     }
 
     #[test]
@@ -647,7 +654,9 @@ commands:
         assert_eq!(scenario.scenario_type, "sequential");
         assert_eq!(scenario.steps.len(), 2);
         assert_eq!(scenario.steps[0].name, "create");
-        assert!(scenario.steps[0].extract_response.contains_key("deployment_id"));
+        assert!(scenario.steps[0]
+            .extract_response
+            .contains_key("deployment_id"));
         assert!(scenario.steps[1].polling.is_some());
     }
 
@@ -717,6 +726,9 @@ commands:
         let spec = parse_flat_spec(yaml).unwrap();
         let arg = &spec.commands[0].args[0];
         assert_eq!(arg.arg_type, Some("file".to_string()));
-        assert_eq!(arg.file_overrides_value_of, Some("config_content".to_string()));
+        assert_eq!(
+            arg.file_overrides_value_of,
+            Some("config_content".to_string())
+        );
     }
 }

@@ -9,7 +9,6 @@ resolver = "2"
 # Common dependencies can be defined here
 anyhow = "1"
 clap = { version = "4.5", features = ["derive"] }
-http = "1"
 jsonpath_lib = "0.3"
 openapiv3 = "1"
 regex = "1"

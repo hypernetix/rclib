@@ -3,7 +3,10 @@ use std::collections::{HashMap, HashSet};
 use clap::{Arg, ArgAction, ArgMatches, Command};
 
 use crate::mapping::*;
-use crate::{build_request_from_command, execute_requests_loop, ExecutionConfig, OutputFormat, RequestSpec, RawRequestSpec};
+use crate::{
+    build_request_from_command, execute_requests_loop, ExecutionConfig, OutputFormat,
+    RawRequestSpec, RequestSpec,
+};
 
 #[derive(Default)]
 struct TreeNode {
@@ -16,7 +19,10 @@ fn leak_str<S: Into<String>>(s: S) -> &'static str {
     Box::leak(s.into().into_boxed_str())
 }
 
-pub fn build_cli(mapping_root: &MappingRoot, default_base_url: &str) -> (Command, HashMap<Vec<String>, CommandSpec>) {
+pub fn build_cli(
+    mapping_root: &MappingRoot,
+    default_base_url: &str,
+) -> (Command, HashMap<Vec<String>, CommandSpec>) {
     // Build a tree of commands from mapping patterns
     let mut root = TreeNode::default();
     let mut leaf_map: HashMap<Vec<String>, CommandSpec> = HashMap::new();
@@ -34,8 +40,15 @@ pub fn build_cli(mapping_root: &MappingRoot, default_base_url: &str) -> (Command
                 for pt in &path_tokens {
                     node = node.children.entry((*pt).to_string()).or_default();
                 }
-                node.args = if cmd.args.is_empty() { derive_args_from_pattern(&cmd.pattern) } else { cmd.args.clone() };
-                leaf_map.insert(path_tokens.iter().map(|s| s.to_string()).collect(), cmd.clone());
+                node.args = if cmd.args.is_empty() {
+                    derive_args_from_pattern(&cmd.pattern)
+                } else {
+                    cmd.args.clone()
+                };
+                leaf_map.insert(
+                    path_tokens.iter().map(|s| s.to_string()).collect(),
+                    cmd.clone(),
+                );
             }
         }
         MappingRoot::Hier(hier) => {
@@ -54,15 +67,31 @@ pub fn build_cli(mapping_root: &MappingRoot, default_base_url: &str) -> (Command
                     long: override_spec.long.clone().or_else(|| base.long.clone()),
                     short: override_spec.short.clone().or_else(|| base.short.clone()),
                     required: override_spec.required.or(base.required),
-                    default: override_spec.default.clone().or_else(|| base.default.clone()),
-                    arg_type: override_spec.arg_type.clone().or_else(|| base.arg_type.clone()),
+                    default: override_spec
+                        .default
+                        .clone()
+                        .or_else(|| base.default.clone()),
+                    arg_type: override_spec
+                        .arg_type
+                        .clone()
+                        .or_else(|| base.arg_type.clone()),
                     value: override_spec.value.clone().or_else(|| base.value.clone()),
                     file_upload: override_spec.file_upload || base.file_upload,
-                    endpoint: override_spec.endpoint.clone().or_else(|| base.endpoint.clone()),
+                    endpoint: override_spec
+                        .endpoint
+                        .clone()
+                        .or_else(|| base.endpoint.clone()),
                     method: override_spec.method.clone().or_else(|| base.method.clone()),
-                    headers: override_spec.headers.clone().or_else(|| base.headers.clone()),
+                    headers: override_spec
+                        .headers
+                        .clone()
+                        .or_else(|| base.headers.clone()),
                     body: override_spec.body.clone().or_else(|| base.body.clone()),
-                    file_overrides_value_of: override_spec.file_overrides_value_of.clone().or_else(|| base.file_overrides_value_of.clone()),                }
+                    file_overrides_value_of: override_spec
+                        .file_overrides_value_of
+                        .clone()
+                        .or_else(|| base.file_overrides_value_of.clone()),
+                }
             }
             fn walk_group(
                 root: &mut TreeNode,
@@ -74,7 +103,9 @@ pub fn build_cli(mapping_root: &MappingRoot, default_base_url: &str) -> (Command
                 path.push(group.name.clone());
                 // Ensure group node exists and set its about
                 let group_node = ensure_path(root, path);
-                if let Some(a) = &group.about { group_node.about = Some(a.clone()); }
+                if let Some(a) = &group.about {
+                    group_node.about = Some(a.clone());
+                }
 
                 for node in &group.subcommands {
                     match node {
@@ -106,7 +137,9 @@ pub fn build_cli(mapping_root: &MappingRoot, default_base_url: &str) -> (Command
                                 for a in &cmd.args {
                                     if let Some(inherit_key) = &a.inherit {
                                         // First check group-level common_args, then top-level
-                                        let base = group.common_args.get(inherit_key)
+                                        let base = group
+                                            .common_args
+                                            .get(inherit_key)
                                             .or_else(|| top_level_common_args.get(inherit_key));
 
                                         if let Some(base) = base {
@@ -132,7 +165,9 @@ pub fn build_cli(mapping_root: &MappingRoot, default_base_url: &str) -> (Command
                             }
 
                             node_ref.args = resolved_args;
-                            if let Some(a) = &cmd.about { node_ref.about = Some(a.clone()); }
+                            if let Some(a) = &cmd.about {
+                                node_ref.about = Some(a.clone());
+                            }
 
                             // Create a resolved command for the leaf map
                             let mut resolved_cmd = cmd.clone();
@@ -144,7 +179,13 @@ pub fn build_cli(mapping_root: &MappingRoot, default_base_url: &str) -> (Command
                 path.pop();
             }
             for g in &hier.commands {
-                walk_group(&mut root, &mut leaf_map, &mut Vec::new(), g, &hier.common_args);
+                walk_group(
+                    &mut root,
+                    &mut leaf_map,
+                    &mut Vec::new(),
+                    g,
+                    &hier.common_args,
+                );
             }
         }
     }
@@ -154,27 +195,122 @@ pub fn build_cli(mapping_root: &MappingRoot, default_base_url: &str) -> (Command
         .about("Hyperspot REST client driven by OpenAPI and YAML mappings")
         .version(env!("CARGO_PKG_VERSION"))
         // Global options
-        .arg(Arg::new("log-file").long("log-file").short('l').help("Path to log file (JSON format)").num_args(1))
-        .arg(Arg::new("base-url").long("base-url").short('u').help("Base API URL").num_args(1).default_value(leak_str(default_base_url.to_string())))
-        .arg(Arg::new("json-output").long("json-output").short('j').help("Output in JSON format").action(ArgAction::SetTrue))
-        .arg(Arg::new("verbose").long("verbose").short('v').help("Verbose output").action(ArgAction::SetTrue))
-        .arg(Arg::new("conn-timeout").long("conn-timeout").help("Connection timeout in seconds").default_value("30").num_args(1))
-        .arg(Arg::new("timeout").long("timeout").short('t').help("Request timeout in seconds (after connection)").default_value("300").num_args(1))
-        .arg(Arg::new("openapi-file").long("openapi-file").help("Path to OpenAPI spec file").num_args(1))
-        .arg(Arg::new("mapping-file").long("mapping-file").help("Path to mapping YAML file").num_args(1))
+        .arg(
+            Arg::new("log-file")
+                .long("log-file")
+                .short('l')
+                .help("Path to log file (JSON format)")
+                .num_args(1),
+        )
+        .arg(
+            Arg::new("base-url")
+                .long("base-url")
+                .short('u')
+                .help("Base API URL")
+                .num_args(1)
+                .default_value(leak_str(default_base_url.to_string())),
+        )
+        .arg(
+            Arg::new("json-output")
+                .long("json-output")
+                .short('j')
+                .help("Output in JSON format")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("verbose")
+                .long("verbose")
+                .short('v')
+                .help("Verbose output")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("conn-timeout")
+                .long("conn-timeout")
+                .help("Connection timeout in seconds")
+                .default_value("30")
+                .num_args(1),
+        )
+        .arg(
+            Arg::new("timeout")
+                .long("timeout")
+                .short('t')
+                .help("Request timeout in seconds (after connection)")
+                .default_value("300")
+                .num_args(1),
+        )
+        .arg(
+            Arg::new("openapi-file")
+                .long("openapi-file")
+                .help("Path to OpenAPI spec file")
+                .num_args(1),
+        )
+        .arg(
+            Arg::new("mapping-file")
+                .long("mapping-file")
+                .help("Path to mapping YAML file")
+                .num_args(1),
+        )
         // Performance testing options
         .next_help_heading("Perf tests options")
-        .arg(Arg::new("count").long("count").short('n').help("Execute given command N times").default_value("1").value_parser(clap::value_parser!(u32)))
-        .arg(Arg::new("duration").long("duration").short('d').help("Execute requests for N seconds (overrides --count)").num_args(1).value_parser(clap::value_parser!(u32)).default_value("0"))
-        .arg(Arg::new("concurrency").long("concurrency").short('c').help("Parallel execution concurrency").num_args(1).value_parser(clap::value_parser!(u32)).default_value("1"));
+        .arg(
+            Arg::new("count")
+                .long("count")
+                .short('n')
+                .help("Execute given command N times")
+                .default_value("1")
+                .value_parser(clap::value_parser!(u32)),
+        )
+        .arg(
+            Arg::new("duration")
+                .long("duration")
+                .short('d')
+                .help("Execute requests for N seconds (overrides --count)")
+                .num_args(1)
+                .value_parser(clap::value_parser!(u32))
+                .default_value("0"),
+        )
+        .arg(
+            Arg::new("concurrency")
+                .long("concurrency")
+                .short('c')
+                .help("Parallel execution concurrency")
+                .num_args(1)
+                .value_parser(clap::value_parser!(u32))
+                .default_value("1"),
+        );
 
     // Add 'raw' command
     let raw_cmd = Command::new("raw")
         .about("Execute raw HTTP request")
-        .arg(Arg::new("method").long("method").help("HTTP method").required(true).num_args(1))
-        .arg(Arg::new("endpoint").long("endpoint").help("Endpoint path or absolute URL").required(true).num_args(1))
-        .arg(Arg::new("header").long("header").short('H').help("Header 'Key: Value' (repeatable)").num_args(1).action(ArgAction::Append))
-        .arg(Arg::new("body").long("body").help("Request body").num_args(1));
+        .arg(
+            Arg::new("method")
+                .long("method")
+                .help("HTTP method")
+                .required(true)
+                .num_args(1),
+        )
+        .arg(
+            Arg::new("endpoint")
+                .long("endpoint")
+                .help("Endpoint path or absolute URL")
+                .required(true)
+                .num_args(1),
+        )
+        .arg(
+            Arg::new("header")
+                .long("header")
+                .short('H')
+                .help("Header 'Key: Value' (repeatable)")
+                .num_args(1)
+                .action(ArgAction::Append),
+        )
+        .arg(
+            Arg::new("body")
+                .long("body")
+                .help("Request body")
+                .num_args(1),
+        );
     app = app.subcommand(raw_cmd);
 
     // Add hierarchical commands
@@ -187,7 +323,9 @@ fn add_children_commands(mut app: Command, path: Vec<String>, node: &TreeNode) -
     // Add children of current node under the app
     for (name, child) in &node.children {
         let mut cmd = Command::new(leak_str(name.clone()));
-        if let Some(about) = &child.about { cmd = cmd.about(leak_str(about.clone())); }
+        if let Some(about) = &child.about {
+            cmd = cmd.about(leak_str(about.clone()));
+        }
         // If this node represents a concrete command (has args), attach its args
         if !child.args.is_empty() {
             // Add args (positional first, then flags)
@@ -201,7 +339,9 @@ fn add_children_commands(mut app: Command, path: Vec<String>, node: &TreeNode) -
                             .required(arg.required.unwrap_or(false))
                             .num_args(1)
                             .index(pos_index);
-                        if let Some(def) = &arg.default { a = a.default_value(leak_str(def.clone())); }
+                        if let Some(def) = &arg.default {
+                            a = a.default_value(leak_str(def.clone()));
+                        }
                         cmd = cmd.arg(a);
                         pos_index += 1;
                     }
@@ -220,11 +360,19 @@ fn add_children_commands(mut app: Command, path: Vec<String>, node: &TreeNode) -
                             a = a.action(ArgAction::SetTrue);
                         } else {
                             a = a.num_args(1);
-                            if let Some(def) = &arg.default { a = a.default_value(leak_str(def.clone())); }
+                            if let Some(def) = &arg.default {
+                                a = a.default_value(leak_str(def.clone()));
+                            }
                         }
 
-                        if let Some(l) = arg.long.as_deref() { a = a.long(leak_str(l.to_string())); } else if let Some(n) = arg.name.as_deref() { a = a.long(leak_str(n.to_string())); }
-                        if let Some(s) = arg.short.as_deref() { a = a.short(s.chars().next().unwrap()); }
+                        if let Some(l) = arg.long.as_deref() {
+                            a = a.long(leak_str(l.to_string()));
+                        } else if let Some(n) = arg.name.as_deref() {
+                            a = a.long(leak_str(n.to_string()));
+                        }
+                        if let Some(s) = arg.short.as_deref() {
+                            a = a.short(s.chars().next().unwrap());
+                        }
                         cmd = cmd.arg(a);
                     }
                 }
@@ -243,7 +391,9 @@ fn add_children_commands(mut app: Command, path: Vec<String>, node: &TreeNode) -
 fn add_children_subcommands(mut cmd: Command, path: Vec<String>, node: &TreeNode) -> Command {
     for (name, child) in &node.children {
         let mut sub = Command::new(leak_str(name.clone()));
-        if let Some(about) = &child.about { sub = sub.about(leak_str(about.clone())); }
+        if let Some(about) = &child.about {
+            sub = sub.about(leak_str(about.clone()));
+        }
         if !child.args.is_empty() {
             let mut pos_index: usize = 1;
             for arg in &child.args {
@@ -255,7 +405,9 @@ fn add_children_subcommands(mut cmd: Command, path: Vec<String>, node: &TreeNode
                             .required(arg.required.unwrap_or(false))
                             .num_args(1)
                             .index(pos_index);
-                        if let Some(def) = &arg.default { a = a.default_value(leak_str(def.clone())); }
+                        if let Some(def) = &arg.default {
+                            a = a.default_value(leak_str(def.clone()));
+                        }
                         sub = sub.arg(a);
                         pos_index += 1;
                     }
@@ -274,11 +426,19 @@ fn add_children_subcommands(mut cmd: Command, path: Vec<String>, node: &TreeNode
                             a = a.action(ArgAction::SetTrue);
                         } else {
                             a = a.num_args(1);
-                            if let Some(def) = &arg.default { a = a.default_value(leak_str(def.clone())); }
+                            if let Some(def) = &arg.default {
+                                a = a.default_value(leak_str(def.clone()));
+                            }
                         }
 
-                        if let Some(l) = arg.long.as_deref() { a = a.long(leak_str(l.to_string())); } else if let Some(n) = arg.name.as_deref() { a = a.long(leak_str(n.to_string())); }
-                        if let Some(s) = arg.short.as_deref() { a = a.short(s.chars().next().unwrap()); }
+                        if let Some(l) = arg.long.as_deref() {
+                            a = a.long(leak_str(l.to_string()));
+                        } else if let Some(n) = arg.name.as_deref() {
+                            a = a.long(leak_str(n.to_string()));
+                        }
+                        if let Some(s) = arg.short.as_deref() {
+                            a = a.short(s.chars().next().unwrap());
+                        }
                         sub = sub.arg(a);
                     }
                 }
@@ -296,10 +456,14 @@ pub fn collect_subcommand_path(matches: &ArgMatches) -> (Vec<String>, &ArgMatche
     let mut path: Vec<String> = Vec::new();
     let mut current = matches;
     while let Some((name, sub_m)) = current.subcommand() {
-        if name == "raw" { break; }
+        if name == "raw" {
+            break;
+        }
         path.push(name.to_string());
         current = sub_m;
-        if sub_m.subcommand().is_none() { break; }
+        if sub_m.subcommand().is_none() {
+            break;
+        }
     }
     (path, current)
 }
@@ -320,10 +484,19 @@ pub fn print_manual_help(path: &[String], cmd: &CommandSpec) {
     // OPTIONS
     println!("\nOPTIONS:");
     for arg in &cmd.args {
-        let long = arg.long.clone().or_else(|| arg.name.clone()).unwrap_or_default();
+        let long = arg
+            .long
+            .clone()
+            .or_else(|| arg.name.clone())
+            .unwrap_or_default();
         let help = arg.help.clone().unwrap_or_default();
         let required = arg.required.unwrap_or(false);
-        println!("  --{} value  {}{}", long, help, if required { " (required)" } else { "" });
+        println!(
+            "  --{} value  {}{}",
+            long,
+            help,
+            if required { " (required)" } else { "" }
+        );
     }
     println!("  --help, -h       show help");
 }
@@ -344,7 +517,8 @@ pub fn pre_scan_value(args: &[String], key: &str) -> Option<String> {
 // Runtime helpers
 // =====================
 
-pub type CustomHandlerFn = dyn Fn(&HashMap<String, String>, &str, bool) -> anyhow::Result<()> + Send + Sync + 'static;
+pub type CustomHandlerFn =
+    dyn Fn(&HashMap<String, String>, &str, bool) -> anyhow::Result<()> + Send + Sync + 'static;
 
 #[derive(Default)]
 pub struct HandlerRegistry {
@@ -353,14 +527,18 @@ pub struct HandlerRegistry {
 
 impl HandlerRegistry {
     #[must_use]
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
     pub fn register<F>(&mut self, name: &str, f: F)
     where
         F: Fn(&HashMap<String, String>, &str, bool) -> anyhow::Result<()> + Send + Sync + 'static,
     {
         self.handlers.insert(name.to_string(), Box::new(f));
     }
-    pub fn get(&self, name: &str) -> Option<&CustomHandlerFn> { self.handlers.get(name).map(AsRef::as_ref) }
+    pub fn get(&self, name: &str) -> Option<&CustomHandlerFn> {
+        self.handlers.get(name).map(AsRef::as_ref)
+    }
 }
 
 pub fn validate_handlers(root: &MappingRoot, registry: &HandlerRegistry) -> anyhow::Result<()> {
@@ -369,7 +547,9 @@ pub fn validate_handlers(root: &MappingRoot, registry: &HandlerRegistry) -> anyh
         MappingRoot::Flat(flat) => {
             for cmd in &flat.commands {
                 if let Some(h) = &cmd.custom_handler {
-                    if !registry.handlers.contains_key(h) { missing.push(h.clone()); }
+                    if !registry.handlers.contains_key(h) {
+                        missing.push(h.clone());
+                    }
                 }
             }
         }
@@ -380,53 +560,111 @@ pub fn validate_handlers(root: &MappingRoot, registry: &HandlerRegistry) -> anyh
                         CommandNode::Group(g) => walk(g, reg, acc),
                         CommandNode::Command(c) => {
                             if let Some(h) = &c.custom_handler {
-                                if !reg.handlers.contains_key(h) { acc.push(h.clone()); }
+                                if !reg.handlers.contains_key(h) {
+                                    acc.push(h.clone());
+                                }
                             }
                         }
                     }
                 }
             }
-            for g in &hier.commands { walk(g, registry, &mut missing); }
+            for g in &hier.commands {
+                walk(g, registry, &mut missing);
+            }
         }
     }
-    if missing.is_empty() { Ok(()) } else { Err(anyhow::anyhow!("Missing custom handlers: {}", missing.join(", "))) }
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(
+            "Missing custom handlers: {}",
+            missing.join(", ")
+        ))
+    }
 }
 
 fn parse_timeout(matches: &ArgMatches, arg_name: &str) -> Option<f64> {
-    matches.get_one::<String>(arg_name).and_then(|s| s.parse::<f64>().ok()).filter(|v| *v >= 0.0)
+    matches
+        .get_one::<String>(arg_name)
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|v| *v >= 0.0)
 }
 
-pub fn collect_vars_from_matches(cmd: &CommandSpec, leaf: &ArgMatches) -> (HashMap<String, String>, HashSet<String>, bool) {
-    let arg_specs: Vec<ArgSpec> = if cmd.args.is_empty() { derive_args_from_pattern(&cmd.pattern) } else { cmd.args.clone() };
+pub fn collect_vars_from_matches(
+    cmd: &CommandSpec,
+    leaf: &ArgMatches,
+) -> (HashMap<String, String>, HashSet<String>, bool) {
+    let arg_specs: Vec<ArgSpec> = if cmd.args.is_empty() {
+        derive_args_from_pattern(&cmd.pattern)
+    } else {
+        cmd.args.clone()
+    };
     let mut vars: HashMap<String, String> = HashMap::new();
     let mut selected: HashSet<String> = HashSet::new();
     let mut missing_required = false;
     for arg in &arg_specs {
-        let name = arg.long.clone().or_else(|| arg.name.clone()).unwrap_or_default();
-        if name.is_empty() { continue; }
+        let name = arg
+            .long
+            .clone()
+            .or_else(|| arg.name.clone())
+            .unwrap_or_default();
+        if name.is_empty() {
+            continue;
+        }
         if arg.arg_type.as_deref() == Some("bool") {
             let is_set = leaf.get_flag(&name);
             if let Some(var_name) = arg.name.clone() {
-                if is_set { selected.insert(var_name.clone()); }
+                if is_set {
+                    selected.insert(var_name.clone());
+                }
                 if let Some(cond) = &arg.value {
                     let val = match cond {
                         ConditionalValue::Mapping { if_set, if_not_set } => {
-                            if is_set { if_set.clone() } else { if_not_set.clone() }
+                            if is_set {
+                                if_set.clone()
+                            } else {
+                                if_not_set.clone()
+                            }
                         }
                         ConditionalValue::Sequence(entries) => {
-                            if is_set { entries.iter().find_map(|e| e.if_set.clone()) } else { entries.iter().find_map(|e| e.if_not_set.clone()) }
+                            if is_set {
+                                entries.iter().find_map(|e| e.if_set.clone())
+                            } else {
+                                entries.iter().find_map(|e| e.if_not_set.clone())
+                            }
                         }
-                    }.unwrap_or_else(|| if is_set { "true".to_string() } else { "false".to_string() });
+                    }
+                    .unwrap_or_else(|| {
+                        if is_set {
+                            "true".to_string()
+                        } else {
+                            "false".to_string()
+                        }
+                    });
                     vars.insert(var_name, val);
                 } else {
-                    vars.insert(var_name, if is_set { "true".to_string() } else { "false".to_string() });
+                    vars.insert(
+                        var_name,
+                        if is_set {
+                            "true".to_string()
+                        } else {
+                            "false".to_string()
+                        },
+                    );
                 }
             }
         } else if let Some(val) = leaf.get_one::<String>(&name) {
-            if let Some(var_name) = arg.name.clone() { vars.insert(var_name.clone(), val.clone()); selected.insert(var_name); }
+            if let Some(var_name) = arg.name.clone() {
+                vars.insert(var_name.clone(), val.clone());
+                selected.insert(var_name);
+            }
         } else if let Some(def) = &arg.default {
-            if let Some(var_name) = arg.name.clone() { vars.insert(var_name, def.clone()); }
-        } else if arg.required.unwrap_or(false) { missing_required = true; }
+            if let Some(var_name) = arg.name.clone() {
+                vars.insert(var_name, def.clone());
+            }
+        } else if arg.required.unwrap_or(false) {
+            missing_required = true;
+        }
     }
     (vars, selected, missing_required)
 }
@@ -438,12 +676,19 @@ pub fn drive_command(
     handlers: &HandlerRegistry,
     user_agent: &str,
 ) -> anyhow::Result<i32> {
-    let base_url = matches.get_one::<String>("base-url").cloned().unwrap_or_else(|| default_base_url.to_string());
+    let base_url = matches
+        .get_one::<String>("base-url")
+        .cloned()
+        .unwrap_or_else(|| default_base_url.to_string());
     let json_output = matches.get_flag("json-output");
     let verbose = matches.get_flag("verbose");
 
     let config = ExecutionConfig {
-        output: if json_output { OutputFormat::Json } else { OutputFormat::Human },
+        output: if json_output {
+            OutputFormat::Json
+        } else {
+            OutputFormat::Human
+        },
         conn_timeout_secs: parse_timeout(matches, "conn-timeout"),
         request_timeout_secs: parse_timeout(matches, "timeout"),
         user_agent,
@@ -455,11 +700,29 @@ pub fn drive_command(
 
     // RAW subcommand handled here
     if let Some(("raw", raw_m)) = matches.subcommand() {
-        let method = raw_m.get_one::<String>("method").cloned().unwrap_or_else(|| "GET".to_string());
-        let endpoint = raw_m.get_one::<String>("endpoint").cloned().unwrap_or_default();
-        let headers: Vec<String> = raw_m.get_many::<String>("header").map(|v| v.cloned().collect()).unwrap_or_default();
+        let method = raw_m
+            .get_one::<String>("method")
+            .cloned()
+            .unwrap_or_else(|| "GET".to_string());
+        let endpoint = raw_m
+            .get_one::<String>("endpoint")
+            .cloned()
+            .unwrap_or_default();
+        let headers: Vec<String> = raw_m
+            .get_many::<String>("header")
+            .map(|v| v.cloned().collect())
+            .unwrap_or_default();
         let body = raw_m.get_one::<String>("body").cloned();
-        let raw_spec = RawRequestSpec { base_url: Some(base_url.clone()), method, endpoint, headers, body, multipart: false, file_fields: HashMap::new(), table_view: None };
+        let raw_spec = RawRequestSpec {
+            base_url: Some(base_url.clone()),
+            method,
+            endpoint,
+            headers,
+            body,
+            multipart: false,
+            file_fields: HashMap::new(),
+            table_view: None,
+        };
         return execute_requests_loop(&RequestSpec::Simple(raw_spec), &config);
     }
 
@@ -473,11 +736,16 @@ pub fn drive_command(
 
     if let Some(cmd) = path_map.get(&path) {
         let (vars, selected, missing_required) = collect_vars_from_matches(cmd, leaf);
-        if missing_required { print_manual_help(&path, cmd); return Ok(2); }
+        if missing_required {
+            print_manual_help(&path, cmd);
+            return Ok(2);
+        }
         let spec = build_request_from_command(Some(base_url.clone()), cmd, &vars, &selected);
         match &spec {
             RequestSpec::CustomHandler { handler_name, vars } => {
-                let h = handlers.get(handler_name).ok_or_else(|| anyhow::anyhow!("No handler registered for {}", handler_name))?;
+                let h = handlers
+                    .get(handler_name)
+                    .ok_or_else(|| anyhow::anyhow!("No handler registered for {}", handler_name))?;
                 h(vars, &base_url, json_output)?;
                 Ok(0)
             }
@@ -487,8 +755,15 @@ pub fn drive_command(
         // Intermediate path: print nested help
         let mut cmd = app2;
         for name in &path {
-            let next_opt = cmd.get_subcommands().find(|c| c.get_name() == name).cloned();
-            if let Some(next_cmd) = next_opt { cmd = next_cmd; } else { break; }
+            let next_opt = cmd
+                .get_subcommands()
+                .find(|c| c.get_name() == name)
+                .cloned();
+            if let Some(next_cmd) = next_opt {
+                cmd = next_cmd;
+            } else {
+                break;
+            }
         }
         let _ = cmd.clone().print_help();
         println!();
@@ -726,14 +1001,12 @@ commands:
             scenario: None,
             multipart: false,
             custom_handler: None,
-            args: vec![
-                ArgSpec {
-                    name: Some("limit".to_string()),
-                    default: Some("10".to_string()),
-                    required: Some(false),
-                    ..Default::default()
-                },
-            ],
+            args: vec![ArgSpec {
+                name: Some("limit".to_string()),
+                default: Some("10".to_string()),
+                required: Some(false),
+                ..Default::default()
+            }],
             use_common_args: vec![],
         };
 
@@ -772,15 +1045,13 @@ commands:
             scenario: None,
             multipart: false,
             custom_handler: None,
-            args: vec![
-                ArgSpec {
-                    name: Some("limit".to_string()),
-                    long: Some("limit".to_string()),
-                    default: Some("10".to_string()),
-                    required: Some(false),
-                    ..Default::default()
-                },
-            ],
+            args: vec![ArgSpec {
+                name: Some("limit".to_string()),
+                long: Some("limit".to_string()),
+                default: Some("10".to_string()),
+                required: Some(false),
+                ..Default::default()
+            }],
             use_common_args: vec![],
         };
 
@@ -798,7 +1069,9 @@ commands:
 "#;
         let root = parse_mapping_root(yaml).unwrap();
         let (app, _) = build_cli(&root, "https://api.example.com");
-        let matches = app.try_get_matches_from(["cli", "users", "list", "--limit", "50"]).unwrap();
+        let matches = app
+            .try_get_matches_from(["cli", "users", "list", "--limit", "50"])
+            .unwrap();
         let (_, leaf) = collect_subcommand_path(&matches);
 
         let (vars, selected, _) = collect_vars_from_matches(&cmd, leaf);
@@ -851,7 +1124,9 @@ commands:
         let (app, _) = build_cli(&root, "https://api.example.com");
 
         // Should be able to parse positional arg
-        let matches = app.try_get_matches_from(["cli", "users", "get", "123"]).unwrap();
+        let matches = app
+            .try_get_matches_from(["cli", "users", "get", "123"])
+            .unwrap();
         let (path, leaf) = collect_subcommand_path(&matches);
         assert_eq!(path, vec!["users", "get"]);
         assert_eq!(leaf.get_one::<String>("id"), Some(&"123".to_string()));
@@ -876,7 +1151,9 @@ commands:
         let (app, _) = build_cli(&root, "https://api.example.com");
 
         // Should be able to use short arg
-        let matches = app.try_get_matches_from(["cli", "users", "list", "-l", "25"]).unwrap();
+        let matches = app
+            .try_get_matches_from(["cli", "users", "list", "-l", "25"])
+            .unwrap();
         let (_, leaf) = collect_subcommand_path(&matches);
         assert_eq!(leaf.get_one::<String>("limit"), Some(&"25".to_string()));
     }
@@ -922,15 +1199,13 @@ commands:
             scenario: None,
             multipart: false,
             custom_handler: None,
-            args: vec![
-                ArgSpec {
-                    name: Some("limit".to_string()),
-                    long: Some("limit".to_string()),
-                    help: Some("Maximum results".to_string()),
-                    required: Some(false),
-                    ..Default::default()
-                },
-            ],
+            args: vec![ArgSpec {
+                name: Some("limit".to_string()),
+                long: Some("limit".to_string()),
+                help: Some("Maximum results".to_string()),
+                required: Some(false),
+                ..Default::default()
+            }],
             use_common_args: vec![],
         };
         // Just verify it doesn't panic
@@ -972,15 +1247,13 @@ commands:
             scenario: None,
             multipart: false,
             custom_handler: None,
-            args: vec![
-                ArgSpec {
-                    name: Some("id".to_string()),
-                    long: Some("id".to_string()),
-                    help: Some("User ID".to_string()),
-                    required: Some(true),
-                    ..Default::default()
-                },
-            ],
+            args: vec![ArgSpec {
+                name: Some("id".to_string()),
+                long: Some("id".to_string()),
+                help: Some("User ID".to_string()),
+                required: Some(true),
+                ..Default::default()
+            }],
             use_common_args: vec![],
         };
         // Just verify it doesn't panic
@@ -1001,7 +1274,9 @@ commands:
 "#;
         let root = parse_mapping_root(yaml).unwrap();
         let (app, _) = build_cli(&root, "https://api.example.com");
-        let matches = app.try_get_matches_from(["cli", "--timeout", "60", "test", "cmd"]).unwrap();
+        let matches = app
+            .try_get_matches_from(["cli", "--timeout", "60", "test", "cmd"])
+            .unwrap();
         let timeout = parse_timeout(&matches, "timeout");
         assert_eq!(timeout, Some(60.0));
     }
@@ -1018,7 +1293,9 @@ commands:
 "#;
         let root = parse_mapping_root(yaml).unwrap();
         let (app, _) = build_cli(&root, "https://api.example.com");
-        let matches = app.try_get_matches_from(["cli", "--timeout", "0", "test", "cmd"]).unwrap();
+        let matches = app
+            .try_get_matches_from(["cli", "--timeout", "0", "test", "cmd"])
+            .unwrap();
         let timeout = parse_timeout(&matches, "timeout");
         assert_eq!(timeout, Some(0.0)); // Zero is valid
     }
@@ -1040,14 +1317,12 @@ commands:
             scenario: None,
             multipart: false,
             custom_handler: None,
-            args: vec![
-                ArgSpec {
-                    name: Some("id".to_string()),
-                    long: Some("id".to_string()),
-                    required: Some(true),
-                    ..Default::default()
-                },
-            ],
+            args: vec![ArgSpec {
+                name: Some("id".to_string()),
+                long: Some("id".to_string()),
+                required: Some(true),
+                ..Default::default()
+            }],
             use_common_args: vec![],
         };
 
@@ -1086,18 +1361,16 @@ commands:
             scenario: None,
             multipart: false,
             custom_handler: None,
-            args: vec![
-                ArgSpec {
-                    name: Some("verbose".to_string()),
-                    long: Some("verbose".to_string()),
-                    arg_type: Some("bool".to_string()),
-                    value: Some(ConditionalValue::Mapping {
-                        if_set: Some("true".to_string()),
-                        if_not_set: Some("false".to_string()),
-                    }),
-                    ..Default::default()
-                },
-            ],
+            args: vec![ArgSpec {
+                name: Some("verbose".to_string()),
+                long: Some("verbose".to_string()),
+                arg_type: Some("bool".to_string()),
+                value: Some(ConditionalValue::Mapping {
+                    if_set: Some("true".to_string()),
+                    if_not_set: Some("false".to_string()),
+                }),
+                ..Default::default()
+            }],
             use_common_args: vec![],
         };
 
@@ -1118,9 +1391,12 @@ commands:
 "#;
         let root = parse_mapping_root(yaml).unwrap();
         let (app, _) = build_cli(&root, "https://api.example.com");
-        
+
         // Test with flag set
-        let matches = app.clone().try_get_matches_from(["cli", "users", "list", "--verbose"]).unwrap();
+        let matches = app
+            .clone()
+            .try_get_matches_from(["cli", "users", "list", "--verbose"])
+            .unwrap();
         let (_, leaf) = collect_subcommand_path(&matches);
         let (vars, _, _) = collect_vars_from_matches(&cmd, leaf);
         assert_eq!(vars.get("verbose"), Some(&"true".to_string()));
@@ -1161,7 +1437,9 @@ commands:
         let flat = parse_flat_spec(yaml).unwrap();
         let root = MappingRoot::Flat(flat);
         let (app, _) = build_cli(&root, "https://api.example.com");
-        let matches = app.try_get_matches_from(["cli", "users", "get", "123"]).unwrap();
+        let matches = app
+            .try_get_matches_from(["cli", "users", "get", "123"])
+            .unwrap();
         let (_, leaf) = collect_subcommand_path(&matches);
 
         let (vars, _, _) = collect_vars_from_matches(&cmd, leaf);
@@ -1226,7 +1504,9 @@ commands:
         let root = parse_mapping_root(yaml).unwrap();
         let (app, path_map) = build_cli(&root, "https://api.example.com");
 
-        let matches = app.try_get_matches_from(["cli", "api", "call", "--format", "xml"]).unwrap();
+        let matches = app
+            .try_get_matches_from(["cli", "api", "call", "--format", "xml"])
+            .unwrap();
         let (path, leaf) = collect_subcommand_path(&matches);
         let cmd = path_map.get(&path).unwrap();
         let (vars, _, _) = collect_vars_from_matches(cmd, leaf);
@@ -1371,7 +1651,9 @@ commands:
         let root = parse_mapping_root(yaml).unwrap();
         let (app, path_map) = build_cli(&root, "https://api.example.com");
 
-        let matches = app.try_get_matches_from(["cli", "api", "call", "--verbose"]).unwrap();
+        let matches = app
+            .try_get_matches_from(["cli", "api", "call", "--verbose"])
+            .unwrap();
         let (path, leaf) = collect_subcommand_path(&matches);
         let cmd = path_map.get(&path).unwrap();
         let (vars, _, _) = collect_vars_from_matches(cmd, leaf);
@@ -1433,18 +1715,28 @@ commands:
         let (app, _) = build_cli(&root, "https://api.example.com");
 
         // Parse raw command - collect_subcommand_path stops at "raw"
-        let matches = app.try_get_matches_from([
-            "cli", "raw",
-            "--method", "POST",
-            "--endpoint", "/api/test",
-            "--header", "Content-Type: application/json",
-            "--body", r#"{"key": "value"}"#
-        ]).unwrap();
+        let matches = app
+            .try_get_matches_from([
+                "cli",
+                "raw",
+                "--method",
+                "POST",
+                "--endpoint",
+                "/api/test",
+                "--header",
+                "Content-Type: application/json",
+                "--body",
+                r#"{"key": "value"}"#,
+            ])
+            .unwrap();
 
         // raw subcommand is handled specially - verify we can get the subcommand
         if let Some(("raw", raw_m)) = matches.subcommand() {
             assert_eq!(raw_m.get_one::<String>("method"), Some(&"POST".to_string()));
-            assert_eq!(raw_m.get_one::<String>("endpoint"), Some(&"/api/test".to_string()));
+            assert_eq!(
+                raw_m.get_one::<String>("endpoint"),
+                Some(&"/api/test".to_string())
+            );
         } else {
             panic!("Expected raw subcommand");
         }
@@ -1465,7 +1757,9 @@ commands:
         let root = parse_mapping_root(yaml).unwrap();
         let (app, _) = build_cli(&root, "https://api.example.com");
 
-        let matches = app.try_get_matches_from(["cli", "--conn-timeout", "45", "test", "cmd"]).unwrap();
+        let matches = app
+            .try_get_matches_from(["cli", "--conn-timeout", "45", "test", "cmd"])
+            .unwrap();
         let timeout = parse_timeout(&matches, "conn-timeout");
         assert_eq!(timeout, Some(45.0));
     }
@@ -1483,7 +1777,9 @@ commands:
         let root = parse_mapping_root(yaml).unwrap();
         let (app, _) = build_cli(&root, "https://api.example.com");
 
-        let matches = app.try_get_matches_from(["cli", "--json-output", "test", "cmd"]).unwrap();
+        let matches = app
+            .try_get_matches_from(["cli", "--json-output", "test", "cmd"])
+            .unwrap();
         assert!(matches.get_flag("json-output"));
     }
 
@@ -1500,7 +1796,9 @@ commands:
         let root = parse_mapping_root(yaml).unwrap();
         let (app, _) = build_cli(&root, "https://api.example.com");
 
-        let matches = app.try_get_matches_from(["cli", "-v", "test", "cmd"]).unwrap();
+        let matches = app
+            .try_get_matches_from(["cli", "-v", "test", "cmd"])
+            .unwrap();
         assert!(matches.get_flag("verbose"));
     }
 
@@ -1519,7 +1817,9 @@ commands:
         let root = parse_mapping_root(yaml).unwrap();
         let (app, _) = build_cli(&root, "https://api.example.com");
 
-        let matches = app.try_get_matches_from(["cli", "--count", "100", "test", "cmd"]).unwrap();
+        let matches = app
+            .try_get_matches_from(["cli", "--count", "100", "test", "cmd"])
+            .unwrap();
         assert_eq!(matches.get_one::<u32>("count"), Some(&100));
     }
 
@@ -1536,7 +1836,9 @@ commands:
         let root = parse_mapping_root(yaml).unwrap();
         let (app, _) = build_cli(&root, "https://api.example.com");
 
-        let matches = app.try_get_matches_from(["cli", "--duration", "30", "test", "cmd"]).unwrap();
+        let matches = app
+            .try_get_matches_from(["cli", "--duration", "30", "test", "cmd"])
+            .unwrap();
         assert_eq!(matches.get_one::<u32>("duration"), Some(&30));
     }
 
@@ -1553,7 +1855,9 @@ commands:
         let root = parse_mapping_root(yaml).unwrap();
         let (app, _) = build_cli(&root, "https://api.example.com");
 
-        let matches = app.try_get_matches_from(["cli", "--concurrency", "4", "test", "cmd"]).unwrap();
+        let matches = app
+            .try_get_matches_from(["cli", "--concurrency", "4", "test", "cmd"])
+            .unwrap();
         assert_eq!(matches.get_one::<u32>("concurrency"), Some(&4));
     }
 }

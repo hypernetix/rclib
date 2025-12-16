@@ -1,24 +1,24 @@
-use std::collections::HashMap;
-use std::collections::HashSet;
-// use std::fmt::Write as _;
-use std::sync::{Arc, atomic::{AtomicU32, AtomicBool, Ordering}};
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc;
+use std::sync::{
+    atomic::{AtomicBool, AtomicU32, Ordering},
+    Arc,
+};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
-use http::HeaderMap;
 use jsonpath_lib as jsonpath;
 use openapiv3::OpenAPI;
 use regex::Regex;
 use reqwest::blocking::{Client, ClientBuilder, Response};
-use reqwest::header::{HeaderName, HeaderValue};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Method;
 use serde_json::Value;
 use uuid::Uuid;
 
-pub mod mapping;
 pub mod cli;
+pub mod mapping;
 
 // =====================
 // Public API
@@ -40,14 +40,17 @@ pub struct RawRequestSpec {
     pub body: Option<String>,
     pub multipart: bool,
     pub file_fields: HashMap<String, String>, // field_name -> file_path
-    pub table_view: Option<Vec<String>>, // optional column hints for array responses
+    pub table_view: Option<Vec<String>>,      // optional column hints for array responses
 }
 
 #[derive(Debug, Clone)]
 pub enum RequestSpec {
     Simple(RawRequestSpec),
     Scenario(ScenarioSpec),
-    CustomHandler { handler_name: String, vars: HashMap<String, String> },
+    CustomHandler {
+        handler_name: String,
+        vars: HashMap<String, String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -104,8 +107,14 @@ fn apply_file_overrides(args: &[mapping::ArgSpec], vars: &mut HashMap<String, St
     for arg in args {
         let dominated_var = arg.arg_type.as_deref() == Some("file")
             && arg.file_overrides_value_of.is_some()
-            && arg.name.as_ref().and_then(|n| vars.get(n)).is_some_and(|p| !p.is_empty());
-        if !dominated_var { continue; }
+            && arg
+                .name
+                .as_ref()
+                .and_then(|n| vars.get(n))
+                .is_some_and(|p| !p.is_empty());
+        if !dominated_var {
+            continue;
+        }
 
         let target_var = arg.file_overrides_value_of.as_ref().unwrap();
         let file_path = vars.get(arg.name.as_ref().unwrap()).unwrap();
@@ -153,8 +162,15 @@ pub fn build_request_from_command(
     }
 
     // Handle regular command
-    let method = cmd.method.as_ref().expect("method is required for non-scenario commands").clone();
-    let endpoint_template = cmd.endpoint.as_ref().expect("endpoint is required for non-scenario commands");
+    let method = cmd
+        .method
+        .as_ref()
+        .expect("method is required for non-scenario commands")
+        .clone();
+    let endpoint_template = cmd
+        .endpoint
+        .as_ref()
+        .expect("endpoint is required for non-scenario commands");
 
     // Add built-in variables for regular commands too
     let mut vars_with_builtins = vars.clone();
@@ -165,7 +181,10 @@ pub fn build_request_from_command(
     // Start with command-level values
     let mut method = method;
     let mut endpoint = substitute_template(endpoint_template, &vars_with_builtins);
-    let mut body = cmd.body.as_ref().map(|t| substitute_template(t, &vars_with_builtins));
+    let mut body = cmd
+        .body
+        .as_ref()
+        .map(|t| substitute_template(t, &vars_with_builtins));
     let mut headers_map: HashMap<String, String> = cmd
         .headers
         .iter()
@@ -177,19 +196,28 @@ pub fn build_request_from_command(
     for a in &cmd.args {
         if let Some(arg_name) = a.name.as_ref() {
             if selected_args.contains(arg_name) {
-                if let Some(ep) = &a.endpoint { endpoint = substitute_template(ep, &vars_with_builtins); }
-                if let Some(m) = &a.method { method = m.clone(); }
+                if let Some(ep) = &a.endpoint {
+                    endpoint = substitute_template(ep, &vars_with_builtins);
+                }
+                if let Some(m) = &a.method {
+                    method = m.clone();
+                }
                 if let Some(hdrs) = &a.headers {
                     for (k, v) in hdrs {
                         headers_map.insert(k.clone(), substitute_template(v, &vars_with_builtins));
                     }
                 }
-                if let Some(b) = &a.body { body = Some(substitute_template(b, &vars_with_builtins)); }
+                if let Some(b) = &a.body {
+                    body = Some(substitute_template(b, &vars_with_builtins));
+                }
             }
         }
     }
 
-    let headers: Vec<String> = headers_map.into_iter().map(|(k, v)| format!("{}: {}", k, v)).collect();
+    let headers: Vec<String> = headers_map
+        .into_iter()
+        .map(|(k, v)| format!("{}: {}", k, v))
+        .collect();
 
     // Handle multipart uploads
     let mut file_fields: HashMap<String, String> = HashMap::new();
@@ -218,7 +246,11 @@ pub fn build_request_from_command(
 }
 
 /// Execute a request and print output according to format.
-pub fn execute_request(spec: &RawRequestSpec, output: OutputFormat, user_agent: &str) -> Result<i32> {
+pub fn execute_request(
+    spec: &RawRequestSpec,
+    output: OutputFormat,
+    user_agent: &str,
+) -> Result<i32> {
     execute_request_with_timeout(spec, output, None, None, user_agent, &HashSet::new(), false)
 }
 
@@ -232,15 +264,28 @@ pub fn execute_request_spec(
     verbose: bool,
 ) -> Result<i32> {
     match spec {
-        RequestSpec::Simple(raw_spec) => {
-            execute_request_with_timeout(raw_spec, output, conn_timeout_secs, request_timeout_secs, user_agent, &HashSet::new(), verbose)
-        }
-        RequestSpec::Scenario(scenario_spec) => {
-            execute_scenario(scenario_spec, output, conn_timeout_secs, request_timeout_secs, user_agent, verbose)
-        }
+        RequestSpec::Simple(raw_spec) => execute_request_with_timeout(
+            raw_spec,
+            output,
+            conn_timeout_secs,
+            request_timeout_secs,
+            user_agent,
+            &HashSet::new(),
+            verbose,
+        ),
+        RequestSpec::Scenario(scenario_spec) => execute_scenario(
+            scenario_spec,
+            output,
+            conn_timeout_secs,
+            request_timeout_secs,
+            user_agent,
+            verbose,
+        ),
         RequestSpec::CustomHandler { .. } => {
             // Custom handlers should not reach this function - they are handled by the calling application
-            bail!("Custom handlers should be handled by the calling application, not by the library");
+            bail!(
+                "Custom handlers should be handled by the calling application, not by the library"
+            );
         }
     }
 }
@@ -282,15 +327,12 @@ fn execute_worker_request(
         Err(_e) => ExecutionResult {
             duration,
             is_success: false,
-        }
+        },
     }
 }
 
 /// Execute a request with count, duration, and concurrency control
-pub fn execute_requests_loop(
-    spec: &RequestSpec,
-    config: &ExecutionConfig<'_>,
-) -> Result<i32> {
+pub fn execute_requests_loop(spec: &RequestSpec, config: &ExecutionConfig<'_>) -> Result<i32> {
     let ExecutionConfig {
         output,
         conn_timeout_secs,
@@ -309,7 +351,16 @@ pub fn execute_requests_loop(
     } else {
         match count {
             Some(c) if c > 1 => Some(c),
-            _ => return execute_request_spec(spec, output, conn_timeout_secs, request_timeout_secs, user_agent, verbose),
+            _ => {
+                return execute_request_spec(
+                    spec,
+                    output,
+                    conn_timeout_secs,
+                    request_timeout_secs,
+                    user_agent,
+                    verbose,
+                )
+            }
         }
     };
 
@@ -321,16 +372,31 @@ pub fn execute_requests_loop(
         if use_duration {
             eprintln!("Warning: Custom handlers cannot be executed with duration. Ignoring --duration option.");
         } else {
-            eprintln!("Warning: Custom handlers cannot be executed in parallel. Ignoring --count option.");
+            eprintln!(
+                "Warning: Custom handlers cannot be executed in parallel. Ignoring --count option."
+            );
         }
-        return execute_request_spec(spec, output, conn_timeout_secs, request_timeout_secs, user_agent, verbose);
+        return execute_request_spec(
+            spec,
+            output,
+            conn_timeout_secs,
+            request_timeout_secs,
+            user_agent,
+            verbose,
+        );
     }
 
     if verbose {
         if use_duration {
-            eprintln!("Executing requests for {} seconds with concurrency {}", duration_secs, concurrency);
+            eprintln!(
+                "Executing requests for {} seconds with concurrency {}",
+                duration_secs, concurrency
+            );
         } else if let Some(count) = target_count {
-            eprintln!("Executing {} requests with concurrency {}", count, concurrency);
+            eprintln!(
+                "Executing {} requests with concurrency {}",
+                count, concurrency
+            );
         }
     }
 
@@ -365,7 +431,9 @@ pub fn execute_requests_loop(
                     }
                 } else {
                     // Count mode: simple check before incrementing
-                    if executed_count_clone.load(Ordering::Relaxed) >= target_count_clone.unwrap_or(0) {
+                    if executed_count_clone.load(Ordering::Relaxed)
+                        >= target_count_clone.unwrap_or(0)
+                    {
                         break;
                     }
                 }
@@ -379,7 +447,11 @@ pub fn execute_requests_loop(
                 }
 
                 // Execute the request
-                let worker_output = if verbose_clone { OutputFormat::Json } else { OutputFormat::Quiet };
+                let worker_output = if verbose_clone {
+                    OutputFormat::Json
+                } else {
+                    OutputFormat::Quiet
+                };
                 let result = execute_worker_request(
                     &spec_clone,
                     worker_output,
@@ -423,8 +495,10 @@ pub fn execute_requests_loop(
         total_response_duration += result.duration;
 
         // Update min/max response times
-        min_response_time = Some(min_response_time.map_or(result.duration, |min| min.min(result.duration)));
-        max_response_time = Some(max_response_time.map_or(result.duration, |max| max.max(result.duration)));
+        min_response_time =
+            Some(min_response_time.map_or(result.duration, |min| min.min(result.duration)));
+        max_response_time =
+            Some(max_response_time.map_or(result.duration, |max| max.max(result.duration)));
 
         if result.is_success {
             success_count += 1;
@@ -445,26 +519,50 @@ pub fn execute_requests_loop(
     if final_executed_count > 1 && !matches!(output, OutputFormat::Json) {
         println!("======= Execution Summary =======");
         println!("Concurrency:            {}", concurrency);
-        println!("Total execution time:   {:.3}s", overall_duration.as_secs_f64());
+        println!(
+            "Total execution time:   {:.3}s",
+            overall_duration.as_secs_f64()
+        );
         println!("Executed requests:      {}", final_executed_count);
         if error_count > 0 {
-            println!("Successful requests:    {} ({:.0}%)", success_count, (success_count as f64 / final_executed_count as f64) * 100.0);
-            println!("Failed requests:        {} ({:.0}%)", error_count, (error_count as f64 / final_executed_count as f64) * 100.0);
+            println!(
+                "Successful requests:    {} ({:.0}%)",
+                success_count,
+                (success_count as f64 / final_executed_count as f64) * 100.0
+            );
+            println!(
+                "Failed requests:        {} ({:.0}%)",
+                error_count,
+                (error_count as f64 / final_executed_count as f64) * 100.0
+            );
         } else {
             println!("Successful requests:    {}", success_count);
             println!("Failed requests:        {}", error_count);
         }
         if final_executed_count > 0 {
-            println!("Average response time:  {:.3}s  (min: {:.3}s, max: {:.3}s)",
+            println!(
+                "Average response time:  {:.3}s  (min: {:.3}s, max: {:.3}s)",
                 total_response_duration.as_secs_f64() / final_executed_count as f64,
-                min_response_time.unwrap_or(Duration::from_millis(0)).as_secs_f64(),
-                max_response_time.unwrap_or(Duration::from_millis(0)).as_secs_f64());
-            println!("Requests per second:    {:.2}", final_executed_count as f64 / overall_duration.as_secs_f64());
+                min_response_time
+                    .unwrap_or(Duration::from_millis(0))
+                    .as_secs_f64(),
+                max_response_time
+                    .unwrap_or(Duration::from_millis(0))
+                    .as_secs_f64()
+            );
+            println!(
+                "Requests per second:    {:.2}",
+                final_executed_count as f64 / overall_duration.as_secs_f64()
+            );
         }
     }
 
     // Return appropriate exit code
-    if error_count > 0 { Ok(1) } else { Ok(0) }
+    if error_count > 0 {
+        Ok(1)
+    } else {
+        Ok(0)
+    }
 }
 
 /// Execute a request with optional connection and request timeout seconds.
@@ -527,16 +625,25 @@ pub fn execute_request_with_timeout(
         eprintln!("-> {} {}", spec.method, full_url);
         if !spec.headers.is_empty() {
             eprintln!("-> Headers:");
-            for h in &spec.headers { eprintln!("   {}", h); }
+            for h in &spec.headers {
+                eprintln!("   {}", h);
+            }
         }
-        if let Some(b) = &spec.body { eprintln!("-> Body: {}", b); }
+        if let Some(b) = &spec.body {
+            eprintln!("-> Body: {}", b);
+        }
     }
 
     let started = std::time::Instant::now();
     let resp = req.send().context("HTTP request failed")?;
     let elapsed_ms = started.elapsed().as_millis();
     if verbose {
-        eprintln!("<- {} {} ({} ms)", resp.status().as_u16(), full_url, elapsed_ms);
+        eprintln!(
+            "<- {} {} ({} ms)",
+            resp.status().as_u16(),
+            full_url,
+            elapsed_ms
+        );
     }
     output_response(resp, output, spec.table_view.as_ref())
 }
@@ -553,11 +660,20 @@ pub fn execute_scenario(
     let mut variables = scenario_spec.vars.clone();
 
     match scenario_spec.scenario.scenario_type.as_str() {
-        "job_with_polling" => {
-            execute_job_with_polling_scenario(scenario_spec, &mut variables, output, conn_timeout_secs, request_timeout_secs, user_agent, verbose)
-        }
+        "job_with_polling" => execute_job_with_polling_scenario(
+            scenario_spec,
+            &mut variables,
+            output,
+            conn_timeout_secs,
+            request_timeout_secs,
+            user_agent,
+            verbose,
+        ),
         _ => {
-            bail!("Unsupported scenario type: {}", scenario_spec.scenario.scenario_type)
+            bail!(
+                "Unsupported scenario type: {}",
+                scenario_spec.scenario.scenario_type
+            )
         }
     }
 }
@@ -582,17 +698,36 @@ fn execute_job_with_polling_scenario(
         bail!("First step must be named 'schedule_job'");
     }
 
-    let schedule_spec = build_raw_spec_from_step(&scenario_spec.base_url, schedule_step, variables)?;
-    if verbose { eprintln!("-> {} {}", schedule_spec.method, build_url(&schedule_spec.base_url, &schedule_spec.endpoint)?); }
-    let schedule_response = execute_single_request(&schedule_spec, conn_timeout_secs, request_timeout_secs, user_agent)?;
+    let schedule_spec =
+        build_raw_spec_from_step(&scenario_spec.base_url, schedule_step, variables)?;
+    if verbose {
+        eprintln!(
+            "-> {} {}",
+            schedule_spec.method,
+            build_url(&schedule_spec.base_url, &schedule_spec.endpoint)?
+        );
+    }
+    let schedule_response = execute_single_request(
+        &schedule_spec,
+        conn_timeout_secs,
+        request_timeout_secs,
+        user_agent,
+    )?;
 
     // Extract response variables
-    extract_response_variables(&schedule_response, &schedule_step.extract_response, variables)?;
+    extract_response_variables(
+        &schedule_response,
+        &schedule_step.extract_response,
+        variables,
+    )?;
 
     if output == OutputFormat::Json {
         println!("Step 1 (schedule_job) completed");
     } else {
-        let job_id = variables.get("job_id").map(|s| s.as_str()).unwrap_or("unknown");
+        let job_id = variables
+            .get("job_id")
+            .map(|s| s.as_str())
+            .unwrap_or("unknown");
         println!("Job scheduled with ID: {}", job_id);
         println!("Waiting for job to complete...");
     }
@@ -603,7 +738,9 @@ fn execute_job_with_polling_scenario(
         bail!("Second step must be named 'poll_job'");
     }
 
-    let polling_config = poll_step.polling.as_ref()
+    let polling_config = poll_step
+        .polling
+        .as_ref()
         .context("poll_job step must have polling configuration")?;
 
     let start_time = Instant::now();
@@ -611,12 +748,26 @@ fn execute_job_with_polling_scenario(
 
     loop {
         if start_time.elapsed() > timeout_duration {
-            bail!("Polling timeout after {} seconds", polling_config.timeout_seconds);
+            bail!(
+                "Polling timeout after {} seconds",
+                polling_config.timeout_seconds
+            );
         }
 
         let poll_spec = build_raw_spec_from_step(&scenario_spec.base_url, poll_step, variables)?;
-        if verbose { eprintln!("-> {} {}", poll_spec.method, build_url(&poll_spec.base_url, &poll_spec.endpoint)?); }
-        let poll_response = execute_single_request(&poll_spec, conn_timeout_secs, request_timeout_secs, user_agent)?;
+        if verbose {
+            eprintln!(
+                "-> {} {}",
+                poll_spec.method,
+                build_url(&poll_spec.base_url, &poll_spec.endpoint)?
+            );
+        }
+        let poll_response = execute_single_request(
+            &poll_spec,
+            conn_timeout_secs,
+            request_timeout_secs,
+            user_agent,
+        )?;
 
         // Parse response to check completion condition
         let response_json: Value = serde_json::from_str(&poll_response)
@@ -684,8 +835,12 @@ fn build_raw_spec_from_step(
     variables: &HashMap<String, String>,
 ) -> Result<RawRequestSpec> {
     let endpoint = substitute_template(&step.endpoint, variables);
-    let body = step.body.as_ref().map(|b| substitute_template(b, variables));
-    let headers: Vec<String> = step.headers
+    let body = step
+        .body
+        .as_ref()
+        .map(|b| substitute_template(b, variables));
+    let headers: Vec<String> = step
+        .headers
         .iter()
         .map(|(k, v)| format!("{}: {}", k, substitute_template(v, variables)))
         .collect();
@@ -760,7 +915,11 @@ fn extract_response_variables(
         if let Some(value) = extract_jsonpath_value(&response_json, jsonpath_expr) {
             variables.insert(var_name.clone(), value);
         } else {
-            bail!("Failed to extract variable '{}' using JSONPath '{}'", var_name, jsonpath_expr);
+            bail!(
+                "Failed to extract variable '{}' using JSONPath '{}'",
+                var_name,
+                jsonpath_expr
+            );
         }
     }
 
@@ -836,7 +995,11 @@ fn parse_headers(raw_headers: &[String]) -> Result<HeaderMap> {
     Ok(map)
 }
 
-fn output_response(resp: Response, output: OutputFormat, table_view: Option<&Vec<String>>) -> Result<i32> {
+fn output_response(
+    resp: Response,
+    output: OutputFormat,
+    table_view: Option<&Vec<String>>,
+) -> Result<i32> {
     let status = resp.status();
     let text = resp.text().unwrap_or_default();
 
@@ -882,10 +1045,14 @@ fn print_human_readable(v: &serde_json::Value, table_view: Option<&Vec<String>>)
                 }
             }
             scalar_entries.sort_by_key(|(k, _)| *k);
-            let width = scalar_entries.iter().map(|(k, _)| k.len()).max().unwrap_or(0);
+            let width = scalar_entries
+                .iter()
+                .map(|(k, _)| k.len())
+                .max()
+                .unwrap_or(0);
             for (k, val) in scalar_entries {
                 let s = scalar_to_string(val);
-                println!("{key:width$}: {val}", key=k, width=width, val=s);
+                println!("{key:width$}: {val}", key = k, width = width, val = s);
             }
             // Then print arrays as tables
             for (k, val) in array_entries {
@@ -906,7 +1073,10 @@ fn print_human_readable(v: &serde_json::Value, table_view: Option<&Vec<String>>)
 }
 
 fn print_array_table(arr: &Vec<serde_json::Value>, table_view: Option<&Vec<String>>) {
-    if arr.is_empty() { println!("(empty)"); return; }
+    if arr.is_empty() {
+        println!("(empty)");
+        return;
+    }
 
     // Parse column specifications (path and optional modifier)
     let col_specs: Vec<ColumnSpec> = if let Some(cols) = table_view {
@@ -920,11 +1090,15 @@ fn print_array_table(arr: &Vec<serde_json::Value>, table_view: Option<&Vec<Strin
                         serde_json::Value::Object(inner) => {
                             for inner_k in inner.keys() {
                                 let path = format!("{}.{}", k, inner_k);
-                                if !derived.contains(&path) { derived.push(path); }
+                                if !derived.contains(&path) {
+                                    derived.push(path);
+                                }
                             }
                         }
                         _ => {
-                            if !derived.contains(k) { derived.push(k.clone()); }
+                            if !derived.contains(k) {
+                                derived.push(k.clone());
+                            }
                         }
                     }
                 }
@@ -940,7 +1114,10 @@ fn print_array_table(arr: &Vec<serde_json::Value>, table_view: Option<&Vec<Strin
     }
 
     // Build header labels (humanized, multi-line by whitespace)
-    let header_labels: Vec<String> = col_specs.iter().map(|c| humanize_column_label_with_modifier(&c.path, &c.modifier)).collect();
+    let header_labels: Vec<String> = col_specs
+        .iter()
+        .map(|c| humanize_column_label_with_modifier(&c.path, &c.modifier))
+        .collect();
     let header_lines: Vec<Vec<String>> = header_labels
         .iter()
         .map(|lbl| lbl.split_whitespace().map(|s| s.to_string()).collect())
@@ -957,7 +1134,9 @@ fn print_array_table(arr: &Vec<serde_json::Value>, table_view: Option<&Vec<Strin
             for (idx, col_spec) in col_specs.iter().enumerate() {
                 let cell_val = get_value_by_path(item, &col_spec.path);
                 let cell = scalar_to_string_with_modifier(cell_val, &col_spec.modifier);
-                if cell.len() > widths[idx] { widths[idx] = cell.len(); }
+                if cell.len() > widths[idx] {
+                    widths[idx] = cell.len();
+                }
             }
         }
     }
@@ -974,8 +1153,12 @@ fn print_array_table(arr: &Vec<serde_json::Value>, table_view: Option<&Vec<Strin
     for line_idx in 0..header_max_lines {
         let mut parts: Vec<String> = Vec::new();
         for (i, col_parts) in header_lines.iter().enumerate() {
-            let s = if line_idx < col_parts.len() { &col_parts[line_idx] } else { "" };
-            parts.push(format!(" {:<width$} ", s, width=widths[i]));
+            let s = if line_idx < col_parts.len() {
+                &col_parts[line_idx]
+            } else {
+                ""
+            };
+            parts.push(format!(" {:<width$} ", s, width = widths[i]));
         }
         println!("|{}|", parts.join("|"));
     }
@@ -989,7 +1172,7 @@ fn print_array_table(arr: &Vec<serde_json::Value>, table_view: Option<&Vec<Strin
             for (i, col_spec) in col_specs.iter().enumerate() {
                 let cell_val = get_value_by_path(item, &col_spec.path);
                 let cell = scalar_to_string_with_modifier(cell_val, &col_spec.modifier);
-                row_parts.push(format!(" {:<width$} ", cell, width=widths[i]));
+                row_parts.push(format!(" {:<width$} ", cell, width = widths[i]));
             }
             println!("|{}|", row_parts.join("|"));
         }
@@ -1023,7 +1206,10 @@ fn parse_column_spec(spec: &str) -> ColumnSpec {
         };
         ColumnSpec { path, modifier }
     } else {
-        ColumnSpec { path: spec.to_string(), modifier: None }
+        ColumnSpec {
+            path: spec.to_string(),
+            modifier: None,
+        }
     }
 }
 
@@ -1032,7 +1218,11 @@ fn get_value_by_path<'a>(v: &'a serde_json::Value, path: &str) -> &'a serde_json
     for seg in path.split('.') {
         match current {
             serde_json::Value::Object(map) => {
-                if let Some(next) = map.get(seg) { current = next; } else { return &serde_json::Value::Null; }
+                if let Some(next) = map.get(seg) {
+                    current = next;
+                } else {
+                    return &serde_json::Value::Null;
+                }
             }
             _ => return &serde_json::Value::Null,
         }
@@ -1045,16 +1235,24 @@ fn humanize_column_label(path: &str) -> String {
     let spaced = last.replace(['_', '-'], " ");
     let mut out_words: Vec<String> = Vec::new();
     for w in spaced.split_whitespace() {
-        if w.is_empty() { continue; }
+        if w.is_empty() {
+            continue;
+        }
         let mut chars = w.chars();
         if let Some(first) = chars.next() {
             let mut s = String::new();
             s.push(first.to_ascii_uppercase());
-            for c in chars { s.push(c.to_ascii_lowercase()); }
+            for c in chars {
+                s.push(c.to_ascii_lowercase());
+            }
             out_words.push(s);
         }
     }
-    if out_words.is_empty() { last.to_string() } else { out_words.join(" ") }
+    if out_words.is_empty() {
+        last.to_string()
+    } else {
+        out_words.join(" ")
+    }
 }
 
 fn humanize_column_label_with_modifier(path: &str, modifier: &Option<SizeModifier>) -> String {
@@ -1077,7 +1275,10 @@ fn scalar_to_string(v: &serde_json::Value) -> String {
     }
 }
 
-fn scalar_to_string_with_modifier(v: &serde_json::Value, modifier: &Option<SizeModifier>) -> String {
+fn scalar_to_string_with_modifier(
+    v: &serde_json::Value,
+    modifier: &Option<SizeModifier>,
+) -> String {
     match modifier {
         Some(size_mod) => {
             // Try to parse as number for size conversion
@@ -1248,7 +1449,12 @@ mod tests {
         };
         let vars = HashMap::new();
         let selected = HashSet::new();
-        let spec = build_request_from_command(Some("https://api.example.com".to_string()), &cmd, &vars, &selected);
+        let spec = build_request_from_command(
+            Some("https://api.example.com".to_string()),
+            &cmd,
+            &vars,
+            &selected,
+        );
 
         if let RequestSpec::Simple(raw) = spec {
             assert_eq!(raw.method, "GET");
@@ -1279,7 +1485,12 @@ mod tests {
         let mut vars = HashMap::new();
         vars.insert("id".to_string(), "123".to_string());
         let selected = HashSet::new();
-        let spec = build_request_from_command(Some("https://api.example.com".to_string()), &cmd, &vars, &selected);
+        let spec = build_request_from_command(
+            Some("https://api.example.com".to_string()),
+            &cmd,
+            &vars,
+            &selected,
+        );
 
         if let RequestSpec::Simple(raw) = spec {
             assert_eq!(raw.endpoint, "/users/123");
@@ -1312,7 +1523,10 @@ mod tests {
         let spec = build_request_from_command(None, &cmd, &vars, &selected);
 
         if let RequestSpec::Simple(raw) = spec {
-            assert_eq!(raw.body, Some(r#"{"name": "John", "email": "john@example.com"}"#.to_string()));
+            assert_eq!(
+                raw.body,
+                Some(r#"{"name": "John", "email": "john@example.com"}"#.to_string())
+            );
         } else {
             panic!("Expected RequestSpec::Simple");
         }
@@ -1372,7 +1586,11 @@ mod tests {
         let selected = HashSet::new();
         let spec = build_request_from_command(None, &cmd, &vars, &selected);
 
-        if let RequestSpec::CustomHandler { handler_name, vars: handler_vars } = spec {
+        if let RequestSpec::CustomHandler {
+            handler_name,
+            vars: handler_vars,
+        } = spec
+        {
             assert_eq!(handler_name, "export_users");
             assert_eq!(handler_vars.get("format"), Some(&"csv".to_string()));
             assert!(handler_vars.contains_key("uuid")); // Built-in variable added
@@ -1385,17 +1603,15 @@ mod tests {
     fn test_build_request_scenario() {
         let scenario = mapping::Scenario {
             scenario_type: "sequential".to_string(),
-            steps: vec![
-                mapping::ScenarioStep {
-                    name: "step1".to_string(),
-                    method: "POST".to_string(),
-                    endpoint: "/start".to_string(),
-                    body: None,
-                    headers: HashMap::new(),
-                    extract_response: HashMap::new(),
-                    polling: None,
-                },
-            ],
+            steps: vec![mapping::ScenarioStep {
+                name: "step1".to_string(),
+                method: "POST".to_string(),
+                endpoint: "/start".to_string(),
+                body: None,
+                headers: HashMap::new(),
+                extract_response: HashMap::new(),
+                polling: None,
+            }],
         };
 
         let cmd = mapping::CommandSpec {
@@ -1415,10 +1631,18 @@ mod tests {
         };
         let vars = HashMap::new();
         let selected = HashSet::new();
-        let spec = build_request_from_command(Some("https://api.example.com".to_string()), &cmd, &vars, &selected);
+        let spec = build_request_from_command(
+            Some("https://api.example.com".to_string()),
+            &cmd,
+            &vars,
+            &selected,
+        );
 
         if let RequestSpec::Scenario(scenario_spec) = spec {
-            assert_eq!(scenario_spec.base_url, Some("https://api.example.com".to_string()));
+            assert_eq!(
+                scenario_spec.base_url,
+                Some("https://api.example.com".to_string())
+            );
             assert_eq!(scenario_spec.scenario.steps.len(), 1);
             assert!(scenario_spec.vars.contains_key("uuid")); // Built-in variable added
         } else {
@@ -1627,7 +1851,7 @@ paths: {}
     #[test]
     fn test_scalar_to_string_number() {
         assert_eq!(scalar_to_string(&serde_json::json!(42)), "42");
-        assert_eq!(scalar_to_string(&serde_json::json!(3.14)), "3.14");
+        assert_eq!(scalar_to_string(&serde_json::json!(3.15)), "3.15");
     }
 
     #[test]
@@ -1786,7 +2010,8 @@ paths: {}
 
     #[test]
     fn test_humanize_column_label_with_modifier_gb() {
-        let result = humanize_column_label_with_modifier("disk_size", &Some(SizeModifier::Gigabytes));
+        let result =
+            humanize_column_label_with_modifier("disk_size", &Some(SizeModifier::Gigabytes));
         assert!(result.contains("Disk Size"));
         assert!(result.contains("GB"));
     }
@@ -1800,7 +2025,8 @@ paths: {}
 
     #[test]
     fn test_humanize_column_label_with_modifier_kb() {
-        let result = humanize_column_label_with_modifier("cache_size", &Some(SizeModifier::Kilobytes));
+        let result =
+            humanize_column_label_with_modifier("cache_size", &Some(SizeModifier::Kilobytes));
         assert!(result.contains("Cache Size"));
         assert!(result.contains("KB"));
     }
@@ -1815,13 +2041,11 @@ paths: {}
 
     #[test]
     fn test_apply_file_overrides_no_file_args() {
-        let args = vec![
-            mapping::ArgSpec {
-                name: Some("name".to_string()),
-                arg_type: None,
-                ..Default::default()
-            },
-        ];
+        let args = vec![mapping::ArgSpec {
+            name: Some("name".to_string()),
+            arg_type: None,
+            ..Default::default()
+        }];
         let mut vars = HashMap::new();
         vars.insert("name".to_string(), "John".to_string());
         apply_file_overrides(&args, &mut vars);
@@ -1830,14 +2054,12 @@ paths: {}
 
     #[test]
     fn test_apply_file_overrides_file_arg_empty_path() {
-        let args = vec![
-            mapping::ArgSpec {
-                name: Some("config_file".to_string()),
-                arg_type: Some("file".to_string()),
-                file_overrides_value_of: Some("config".to_string()),
-                ..Default::default()
-            },
-        ];
+        let args = vec![mapping::ArgSpec {
+            name: Some("config_file".to_string()),
+            arg_type: Some("file".to_string()),
+            file_overrides_value_of: Some("config".to_string()),
+            ..Default::default()
+        }];
         let mut vars = HashMap::new();
         vars.insert("config_file".to_string(), "".to_string());
         apply_file_overrides(&args, &mut vars);
@@ -1846,16 +2068,17 @@ paths: {}
 
     #[test]
     fn test_apply_file_overrides_missing_file() {
-        let args = vec![
-            mapping::ArgSpec {
-                name: Some("config_file".to_string()),
-                arg_type: Some("file".to_string()),
-                file_overrides_value_of: Some("config".to_string()),
-                ..Default::default()
-            },
-        ];
+        let args = vec![mapping::ArgSpec {
+            name: Some("config_file".to_string()),
+            arg_type: Some("file".to_string()),
+            file_overrides_value_of: Some("config".to_string()),
+            ..Default::default()
+        }];
         let mut vars = HashMap::new();
-        vars.insert("config_file".to_string(), "/nonexistent/path/file.txt".to_string());
+        vars.insert(
+            "config_file".to_string(),
+            "/nonexistent/path/file.txt".to_string(),
+        );
         apply_file_overrides(&args, &mut vars);
         // Should not insert config since file doesn't exist
         assert!(!vars.contains_key("config"));
@@ -1922,20 +2145,23 @@ paths: {}
             scenario: None,
             multipart: false,
             custom_handler: None,
-            args: vec![
-                mapping::ArgSpec {
-                    name: Some("override_arg".to_string()),
-                    endpoint: Some("/overridden".to_string()),
-                    method: Some("POST".to_string()),
-                    ..Default::default()
-                },
-            ],
+            args: vec![mapping::ArgSpec {
+                name: Some("override_arg".to_string()),
+                endpoint: Some("/overridden".to_string()),
+                method: Some("POST".to_string()),
+                ..Default::default()
+            }],
             use_common_args: vec![],
         };
         let vars = HashMap::new();
         let mut selected = HashSet::new();
         selected.insert("override_arg".to_string());
-        let spec = build_request_from_command(Some("https://api.example.com".to_string()), &cmd, &vars, &selected);
+        let spec = build_request_from_command(
+            Some("https://api.example.com".to_string()),
+            &cmd,
+            &vars,
+            &selected,
+        );
 
         if let RequestSpec::Simple(raw) = spec {
             assert_eq!(raw.endpoint, "/overridden");
@@ -1959,13 +2185,11 @@ paths: {}
             scenario: None,
             multipart: true,
             custom_handler: None,
-            args: vec![
-                mapping::ArgSpec {
-                    name: Some("file".to_string()),
-                    file_upload: true,
-                    ..Default::default()
-                },
-            ],
+            args: vec![mapping::ArgSpec {
+                name: Some("file".to_string()),
+                file_upload: true,
+                ..Default::default()
+            }],
             use_common_args: vec![],
         };
         let mut vars = HashMap::new();
@@ -2036,7 +2260,8 @@ paths: {}
         vars.insert("id".to_string(), "123".to_string());
         vars.insert("name".to_string(), "Test".to_string());
 
-        let result = build_raw_spec_from_step(&Some("https://api.example.com".to_string()), &step, &vars);
+        let result =
+            build_raw_spec_from_step(&Some("https://api.example.com".to_string()), &step, &vars);
         assert!(result.is_ok());
         let spec = result.unwrap();
         assert_eq!(spec.method, "POST");
@@ -2271,20 +2496,23 @@ paths: {}
             scenario: None,
             multipart: false,
             custom_handler: None,
-            args: vec![
-                mapping::ArgSpec {
-                    name: Some("custom_arg".to_string()),
-                    headers: Some(arg_headers),
-                    body: Some(r#"{"override": true}"#.to_string()),
-                    ..Default::default()
-                },
-            ],
+            args: vec![mapping::ArgSpec {
+                name: Some("custom_arg".to_string()),
+                headers: Some(arg_headers),
+                body: Some(r#"{"override": true}"#.to_string()),
+                ..Default::default()
+            }],
             use_common_args: vec![],
         };
         let vars = HashMap::new();
         let mut selected = HashSet::new();
         selected.insert("custom_arg".to_string());
-        let spec = build_request_from_command(Some("https://api.example.com".to_string()), &cmd, &vars, &selected);
+        let spec = build_request_from_command(
+            Some("https://api.example.com".to_string()),
+            &cmd,
+            &vars,
+            &selected,
+        );
 
         if let RequestSpec::Simple(raw) = spec {
             assert!(raw.headers.iter().any(|h| h.contains("X-Custom")));
@@ -2299,7 +2527,7 @@ paths: {}
     #[test]
     fn test_apply_file_overrides_with_real_file() {
         use std::io::Write;
-        
+
         // Create a temp file
         let temp_dir = std::env::temp_dir();
         let temp_file = temp_dir.join("rclib_test_file.txt");
@@ -2307,19 +2535,20 @@ paths: {}
         writeln!(file, "file content here").unwrap();
         drop(file);
 
-        let args = vec![
-            mapping::ArgSpec {
-                name: Some("config_file".to_string()),
-                arg_type: Some("file".to_string()),
-                file_overrides_value_of: Some("config".to_string()),
-                ..Default::default()
-            },
-        ];
+        let args = vec![mapping::ArgSpec {
+            name: Some("config_file".to_string()),
+            arg_type: Some("file".to_string()),
+            file_overrides_value_of: Some("config".to_string()),
+            ..Default::default()
+        }];
         let mut vars = HashMap::new();
-        vars.insert("config_file".to_string(), temp_file.to_string_lossy().to_string());
-        
+        vars.insert(
+            "config_file".to_string(),
+            temp_file.to_string_lossy().to_string(),
+        );
+
         apply_file_overrides(&args, &mut vars);
-        
+
         assert!(vars.contains_key("config"));
         assert!(vars.get("config").unwrap().contains("file content here"));
 
@@ -2339,8 +2568,8 @@ paths: {}
     #[test]
     fn test_output_format_clone() {
         let format = OutputFormat::Human;
-        let cloned = format.clone();
-        assert_eq!(cloned, OutputFormat::Human);
+        let copied = format;
+        assert_eq!(copied, OutputFormat::Human);
     }
 
     #[test]
@@ -2399,7 +2628,11 @@ paths: {}
             endpoint: Some("/users".to_string()),
             body: None,
             headers: HashMap::new(),
-            table_view: Some(vec!["id".to_string(), "name".to_string(), "email".to_string()]),
+            table_view: Some(vec![
+                "id".to_string(),
+                "name".to_string(),
+                "email".to_string(),
+            ]),
             scenario: None,
             multipart: false,
             custom_handler: None,
@@ -2435,13 +2668,11 @@ paths: {}
             scenario: None,
             multipart: true,
             custom_handler: None,
-            args: vec![
-                mapping::ArgSpec {
-                    name: Some("description".to_string()),
-                    file_upload: false, // Not a file upload
-                    ..Default::default()
-                },
-            ],
+            args: vec![mapping::ArgSpec {
+                name: Some("description".to_string()),
+                file_upload: false, // Not a file upload
+                ..Default::default()
+            }],
             use_common_args: vec![],
         };
         let mut vars = HashMap::new();
@@ -2507,7 +2738,12 @@ paths: {}
         let mut vars = HashMap::new();
         vars.insert("job_name".to_string(), "test_job".to_string());
         let selected = HashSet::new();
-        let spec = build_request_from_command(Some("https://api.example.com".to_string()), &cmd, &vars, &selected);
+        let spec = build_request_from_command(
+            Some("https://api.example.com".to_string()),
+            &cmd,
+            &vars,
+            &selected,
+        );
 
         if let RequestSpec::Scenario(scenario_spec) = spec {
             assert_eq!(scenario_spec.scenario.scenario_type, "job_with_polling");
@@ -2524,7 +2760,7 @@ paths: {}
     #[test]
     fn test_build_request_custom_handler_with_file_override() {
         use std::io::Write;
-        
+
         // Create a temp file
         let temp_dir = std::env::temp_dir();
         let temp_file = temp_dir.join("rclib_handler_test.txt");
@@ -2544,25 +2780,33 @@ paths: {}
             scenario: None,
             multipart: false,
             custom_handler: Some("process_handler".to_string()),
-            args: vec![
-                mapping::ArgSpec {
-                    name: Some("input_file".to_string()),
-                    arg_type: Some("file".to_string()),
-                    file_overrides_value_of: Some("input_content".to_string()),
-                    ..Default::default()
-                },
-            ],
+            args: vec![mapping::ArgSpec {
+                name: Some("input_file".to_string()),
+                arg_type: Some("file".to_string()),
+                file_overrides_value_of: Some("input_content".to_string()),
+                ..Default::default()
+            }],
             use_common_args: vec![],
         };
         let mut vars = HashMap::new();
-        vars.insert("input_file".to_string(), temp_file.to_string_lossy().to_string());
+        vars.insert(
+            "input_file".to_string(),
+            temp_file.to_string_lossy().to_string(),
+        );
         let selected = HashSet::new();
         let spec = build_request_from_command(None, &cmd, &vars, &selected);
 
-        if let RequestSpec::CustomHandler { handler_name, vars: handler_vars } = spec {
+        if let RequestSpec::CustomHandler {
+            handler_name,
+            vars: handler_vars,
+        } = spec
+        {
             assert_eq!(handler_name, "process_handler");
             assert!(handler_vars.contains_key("input_content"));
-            assert!(handler_vars.get("input_content").unwrap().contains("handler file content"));
+            assert!(handler_vars
+                .get("input_content")
+                .unwrap()
+                .contains("handler file content"));
         } else {
             panic!("Expected RequestSpec::CustomHandler");
         }
@@ -2591,7 +2835,7 @@ paths: {}
             is_success: false,
         };
         let cloned = result.clone();
-        assert_eq!(cloned.is_success, false);
+        assert!(!cloned.is_success);
         assert_eq!(cloned.duration.as_secs(), 1);
     }
 
@@ -2626,7 +2870,7 @@ paths: {}
         let gb = SizeModifier::Gigabytes;
         let mb = SizeModifier::Megabytes;
         let kb = SizeModifier::Kilobytes;
-        
+
         assert!(format!("{:?}", gb).contains("Gigabytes"));
         assert!(format!("{:?}", mb).contains("Megabytes"));
         assert!(format!("{:?}", kb).contains("Kilobytes"));
@@ -2644,7 +2888,7 @@ paths: {}
     #[test]
     fn test_build_request_simple_with_file_override() {
         use std::io::Write;
-        
+
         // Create a temp file
         let temp_dir = std::env::temp_dir();
         let temp_file = temp_dir.join("rclib_simple_test.json");
@@ -2664,20 +2908,26 @@ paths: {}
             scenario: None,
             multipart: false,
             custom_handler: None,
-            args: vec![
-                mapping::ArgSpec {
-                    name: Some("body_file".to_string()),
-                    arg_type: Some("file".to_string()),
-                    file_overrides_value_of: Some("body".to_string()),
-                    ..Default::default()
-                },
-            ],
+            args: vec![mapping::ArgSpec {
+                name: Some("body_file".to_string()),
+                arg_type: Some("file".to_string()),
+                file_overrides_value_of: Some("body".to_string()),
+                ..Default::default()
+            }],
             use_common_args: vec![],
         };
         let mut vars = HashMap::new();
-        vars.insert("body_file".to_string(), temp_file.to_string_lossy().to_string());
+        vars.insert(
+            "body_file".to_string(),
+            temp_file.to_string_lossy().to_string(),
+        );
         let selected = HashSet::new();
-        let spec = build_request_from_command(Some("https://api.example.com".to_string()), &cmd, &vars, &selected);
+        let spec = build_request_from_command(
+            Some("https://api.example.com".to_string()),
+            &cmd,
+            &vars,
+            &selected,
+        );
 
         if let RequestSpec::Simple(raw) = spec {
             assert!(raw.body.is_some());
@@ -2695,7 +2945,7 @@ paths: {}
     #[test]
     fn test_build_request_scenario_with_file_override() {
         use std::io::Write;
-        
+
         // Create a temp file
         let temp_dir = std::env::temp_dir();
         let temp_file = temp_dir.join("rclib_scenario_test.json");
@@ -2743,24 +2993,34 @@ paths: {}
             scenario: Some(scenario),
             multipart: false,
             custom_handler: None,
-            args: vec![
-                mapping::ArgSpec {
-                    name: Some("config_file".to_string()),
-                    arg_type: Some("file".to_string()),
-                    file_overrides_value_of: Some("config".to_string()),
-                    ..Default::default()
-                },
-            ],
+            args: vec![mapping::ArgSpec {
+                name: Some("config_file".to_string()),
+                arg_type: Some("file".to_string()),
+                file_overrides_value_of: Some("config".to_string()),
+                ..Default::default()
+            }],
             use_common_args: vec![],
         };
         let mut vars = HashMap::new();
-        vars.insert("config_file".to_string(), temp_file.to_string_lossy().to_string());
+        vars.insert(
+            "config_file".to_string(),
+            temp_file.to_string_lossy().to_string(),
+        );
         let selected = HashSet::new();
-        let spec = build_request_from_command(Some("https://api.example.com".to_string()), &cmd, &vars, &selected);
+        let spec = build_request_from_command(
+            Some("https://api.example.com".to_string()),
+            &cmd,
+            &vars,
+            &selected,
+        );
 
         if let RequestSpec::Scenario(scenario_spec) = spec {
             assert!(scenario_spec.vars.contains_key("config"));
-            assert!(scenario_spec.vars.get("config").unwrap().contains("scenario config content"));
+            assert!(scenario_spec
+                .vars
+                .get("config")
+                .unwrap()
+                .contains("scenario config content"));
         } else {
             panic!("Expected RequestSpec::Scenario");
         }
@@ -2830,10 +3090,13 @@ paths: {}
 
     #[test]
     fn test_print_array_table_with_all_modifiers() {
-        let arr = vec![
-            serde_json::json!({"gb": 1073741824_i64, "mb": 1048576_i64, "kb": 1024_i64}),
+        let arr =
+            vec![serde_json::json!({"gb": 1073741824_i64, "mb": 1048576_i64, "kb": 1024_i64})];
+        let cols = vec![
+            "gb:gb".to_string(),
+            "mb:mb".to_string(),
+            "kb:kb".to_string(),
         ];
-        let cols = vec!["gb:gb".to_string(), "mb:mb".to_string(), "kb:kb".to_string()];
         print_array_table(&arr, Some(&cols));
     }
 

@@ -4,11 +4,12 @@
 
 use rclib::{
     build_request_from_command,
+    cli::{
+        build_cli, collect_subcommand_path, collect_vars_from_matches, validate_handlers,
+        HandlerRegistry,
+    },
     mapping::{parse_mapping_root, MappingRoot},
-    cli::{build_cli, collect_subcommand_path, collect_vars_from_matches, HandlerRegistry, validate_handlers},
-    RequestSpec,
-    OutputFormat,
-    ExecutionConfig,
+    ExecutionConfig, OutputFormat, RequestSpec,
 };
 
 // ==================== Mapping → CLI Integration ====================
@@ -51,7 +52,9 @@ commands:
     assert!(path_map.contains_key(&vec!["users".to_string(), "get".to_string()]));
 
     // 4. Parse arguments
-    let matches = app.try_get_matches_from(["cli", "users", "list", "--limit", "25"]).unwrap();
+    let matches = app
+        .try_get_matches_from(["cli", "users", "list", "--limit", "25"])
+        .unwrap();
     let (path, leaf) = collect_subcommand_path(&matches);
     assert_eq!(path, vec!["users", "list"]);
 
@@ -63,7 +66,12 @@ commands:
     assert!(selected.contains("limit"));
 
     // 6. Build request spec
-    let spec = build_request_from_command(Some("https://api.example.com".to_string()), cmd, &vars, &selected);
+    let spec = build_request_from_command(
+        Some("https://api.example.com".to_string()),
+        cmd,
+        &vars,
+        &selected,
+    );
     if let RequestSpec::Simple(raw) = spec {
         assert_eq!(raw.method, "GET");
         assert_eq!(raw.endpoint, "/users");
@@ -89,12 +97,19 @@ commands:
     let root = parse_mapping_root(yaml).unwrap();
     let (app, path_map) = build_cli(&root, "https://api.example.com");
 
-    let matches = app.try_get_matches_from(["cli", "users", "get", "123"]).unwrap();
+    let matches = app
+        .try_get_matches_from(["cli", "users", "get", "123"])
+        .unwrap();
     let (path, leaf) = collect_subcommand_path(&matches);
     let cmd = path_map.get(&path).unwrap();
     let (vars, selected, _) = collect_vars_from_matches(cmd, leaf);
 
-    let spec = build_request_from_command(Some("https://api.example.com".to_string()), cmd, &vars, &selected);
+    let spec = build_request_from_command(
+        Some("https://api.example.com".to_string()),
+        cmd,
+        &vars,
+        &selected,
+    );
     if let RequestSpec::Simple(raw) = spec {
         assert_eq!(raw.endpoint, "/users/123");
     } else {
@@ -134,14 +149,20 @@ commands:
 
     // Build and parse CLI
     let (app, path_map) = build_cli(&root, "https://api.example.com");
-    let matches = app.try_get_matches_from(["cli", "export", "users", "--format", "csv"]).unwrap();
+    let matches = app
+        .try_get_matches_from(["cli", "export", "users", "--format", "csv"])
+        .unwrap();
     let (path, leaf) = collect_subcommand_path(&matches);
     let cmd = path_map.get(&path).unwrap();
     let (vars, selected, _) = collect_vars_from_matches(cmd, leaf);
 
     // Build request spec
     let spec = build_request_from_command(None, cmd, &vars, &selected);
-    if let RequestSpec::CustomHandler { handler_name, vars: handler_vars } = spec {
+    if let RequestSpec::CustomHandler {
+        handler_name,
+        vars: handler_vars,
+    } = spec
+    {
         assert_eq!(handler_name, "export_users");
         assert_eq!(handler_vars.get("format"), Some(&"csv".to_string()));
         assert_eq!(handler_vars.get("output"), Some(&"users.json".to_string()));
@@ -185,21 +206,38 @@ commands:
     let root = parse_mapping_root(yaml).unwrap();
     let (app, path_map) = build_cli(&root, "https://api.example.com");
 
-    let matches = app.try_get_matches_from([
-        "cli", "api", "call", "acme", "myproject",
-        "--name", "Test Project",
-        "--desc", "A test project",
-        "--token", "secret123"
-    ]).unwrap();
+    let matches = app
+        .try_get_matches_from([
+            "cli",
+            "api",
+            "call",
+            "acme",
+            "myproject",
+            "--name",
+            "Test Project",
+            "--desc",
+            "A test project",
+            "--token",
+            "secret123",
+        ])
+        .unwrap();
 
     let (path, leaf) = collect_subcommand_path(&matches);
     let cmd = path_map.get(&path).unwrap();
     let (vars, selected, _) = collect_vars_from_matches(cmd, leaf);
 
-    let spec = build_request_from_command(Some("https://api.example.com".to_string()), cmd, &vars, &selected);
+    let spec = build_request_from_command(
+        Some("https://api.example.com".to_string()),
+        cmd,
+        &vars,
+        &selected,
+    );
     if let RequestSpec::Simple(raw) = spec {
         assert_eq!(raw.endpoint, "/orgs/acme/projects/myproject");
-        assert_eq!(raw.body, Some(r#"{"name": "Test Project", "description": "A test project"}"#.to_string()));
+        assert_eq!(
+            raw.body,
+            Some(r#"{"name": "Test Project", "description": "A test project"}"#.to_string())
+        );
         assert!(raw.headers.iter().any(|h| h.contains("Bearer secret123")));
         assert!(raw.headers.iter().any(|h| h.contains("X-Org-Id: acme")));
     } else {
@@ -245,9 +283,9 @@ commands:
     ]));
 
     // Parse and execute
-    let matches = app.try_get_matches_from([
-        "cli", "cloud", "compute", "instances", "get", "vm-123"
-    ]).unwrap();
+    let matches = app
+        .try_get_matches_from(["cli", "cloud", "compute", "instances", "get", "vm-123"])
+        .unwrap();
 
     let (path, leaf) = collect_subcommand_path(&matches);
     assert_eq!(path, vec!["cloud", "compute", "instances", "get"]);
@@ -281,14 +319,19 @@ commands:
     let (app, path_map) = build_cli(&root, "https://api.example.com");
 
     // Without flag
-    let matches = app.clone().try_get_matches_from(["cli", "users", "list"]).unwrap();
+    let matches = app
+        .clone()
+        .try_get_matches_from(["cli", "users", "list"])
+        .unwrap();
     let (path, leaf) = collect_subcommand_path(&matches);
     let cmd = path_map.get(&path).unwrap();
     let (vars, _, _) = collect_vars_from_matches(cmd, leaf);
     assert_eq!(vars.get("verbose"), Some(&"false".to_string()));
 
     // With flag
-    let matches = app.try_get_matches_from(["cli", "users", "list", "--verbose"]).unwrap();
+    let matches = app
+        .try_get_matches_from(["cli", "users", "list", "--verbose"])
+        .unwrap();
     let (_path, leaf) = collect_subcommand_path(&matches);
     let (vars, _, _) = collect_vars_from_matches(cmd, leaf);
     assert_eq!(vars.get("verbose"), Some(&"true".to_string()));
@@ -319,7 +362,9 @@ commands:
     let root = parse_mapping_root(yaml).unwrap();
     let (app, path_map) = build_cli(&root, "https://api.example.com");
 
-    let matches = app.try_get_matches_from(["cli", "users", "list", "--output", "yaml"]).unwrap();
+    let matches = app
+        .try_get_matches_from(["cli", "users", "list", "--output", "yaml"])
+        .unwrap();
     let (path, leaf) = collect_subcommand_path(&matches);
     let cmd = path_map.get(&path).unwrap();
     let (vars, _, _) = collect_vars_from_matches(cmd, leaf);
@@ -364,7 +409,10 @@ commands:
 
     let result = validate_handlers(&root, &reg);
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("nonexistent_handler"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("nonexistent_handler"));
 }
 
 #[test]
@@ -404,12 +452,19 @@ commands:
     let root = parse_mapping_root(yaml).unwrap();
     let (app, path_map) = build_cli(&root, "https://api.example.com");
 
-    let matches = app.try_get_matches_from(["cli", "deploy", "app", "--app", "myapp"]).unwrap();
+    let matches = app
+        .try_get_matches_from(["cli", "deploy", "app", "--app", "myapp"])
+        .unwrap();
     let (path, leaf) = collect_subcommand_path(&matches);
     let cmd = path_map.get(&path).unwrap();
     let (vars, selected, _) = collect_vars_from_matches(cmd, leaf);
 
-    let spec = build_request_from_command(Some("https://api.example.com".to_string()), cmd, &vars, &selected);
+    let spec = build_request_from_command(
+        Some("https://api.example.com".to_string()),
+        cmd,
+        &vars,
+        &selected,
+    );
     if let RequestSpec::Scenario(scenario_spec) = spec {
         assert_eq!(scenario_spec.scenario.steps.len(), 2);
         assert_eq!(scenario_spec.scenario.steps[0].name, "create_deployment");

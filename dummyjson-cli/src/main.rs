@@ -1,6 +1,6 @@
+use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 
@@ -27,18 +27,22 @@ fn real_main() -> Result<()> {
 
     // Load OpenAPI (for default base URL)
     let openapi_text = if let Some(path) = openapi_file.as_deref() {
-        fs::read_to_string(path).with_context(|| format!("Failed to read openapi file: {}", path))?
+        fs::read_to_string(path)
+            .with_context(|| format!("Failed to read openapi file: {}", path))?
     } else {
         EMBEDDED_OPENAPI.to_string()
     };
     let openapi = rclib::parse_openapi(&openapi_text).context("OpenAPI parsing failed")?;
-    let default_base_url = openapi.servers.first().map(|s| s.url.clone()).unwrap_or_else(|| {
-        "https://dummyjson.com".to_string()
-    });
+    let default_base_url = openapi
+        .servers
+        .first()
+        .map(|s| s.url.clone())
+        .unwrap_or_else(|| "https://dummyjson.com".to_string());
 
     // Load mapping used to build the dynamic command tree
     let mapping_yaml = if let Some(path) = mapping_file.as_deref() {
-        fs::read_to_string(path).with_context(|| format!("Failed to read mapping file: {}", path))?
+        fs::read_to_string(path)
+            .with_context(|| format!("Failed to read mapping file: {}", path))?
     } else {
         EMBEDDED_MAPPING.to_string()
     };
@@ -66,7 +70,13 @@ fn real_main() -> Result<()> {
 
     // Delegate command driving to rclib
     let user_agent = format!("{}/{}", APP_NAME, env!("CARGO_PKG_VERSION"));
-    let exit_code = rclib::cli::drive_command(&mapping_root, &default_base_url, &matches, &reg, &user_agent)?;
+    let exit_code = rclib::cli::drive_command(
+        &mapping_root,
+        &default_base_url,
+        &matches,
+        &reg,
+        &user_agent,
+    )?;
     std::process::exit(exit_code);
 }
 
@@ -77,8 +87,14 @@ fn handle_export_users(
     json_output: bool,
 ) -> Result<()> {
     let format = vars.get("format").map(|s| s.as_str()).unwrap_or("json");
-    let output_file = vars.get("output_file").map(|s| s.as_str()).unwrap_or("users_export.json");
-    let include_sensitive = vars.get("include_sensitive").map(|s| s == "true").unwrap_or(false);
+    let output_file = vars
+        .get("output_file")
+        .map(|s| s.as_str())
+        .unwrap_or("users_export.json");
+    let include_sensitive = vars
+        .get("include_sensitive")
+        .map(|s| s == "true")
+        .unwrap_or(false);
     let limit = vars.get("limit").map(|s| s.as_str()).unwrap_or("100");
     let skip = vars.get("skip").map(|s| s.as_str()).unwrap_or("0");
 
@@ -101,10 +117,20 @@ fn handle_export_users(
         println!("User Export Operation");
         println!("Format: {}", format);
         println!("Output: {}", output_file);
-        println!("Sensitive data: {}", if include_sensitive { "included" } else { "excluded" });
+        println!(
+            "Sensitive data: {}",
+            if include_sensitive {
+                "included"
+            } else {
+                "excluded"
+            }
+        );
         println!("Records: {} (starting from {})", limit, skip);
         println!("API Base: {}", base_url);
-        println!("\n Export would fetch from: {}/users?limit={}&skip={}", base_url, limit, skip);
+        println!(
+            "\n Export would fetch from: {}/users?limit={}&skip={}",
+            base_url, limit, skip
+        );
         println!(" Would save to: {}", output_file);
     }
 
@@ -117,10 +143,16 @@ fn handle_product_analytics(
     base_url: &str,
     json_output: bool,
 ) -> Result<()> {
-    let report_type = vars.get("report_type").map(|s| s.as_str()).unwrap_or("summary");
+    let report_type = vars
+        .get("report_type")
+        .map(|s| s.as_str())
+        .unwrap_or("summary");
     let category_filter = vars.get("category_filter").map(|s| s.as_str());
     let price_range = vars.get("price_range").map(|s| s.as_str());
-    let output_format = vars.get("output_format").map(|s| s.as_str()).unwrap_or("table");
+    let output_format = vars
+        .get("output_format")
+        .map(|s| s.as_str())
+        .unwrap_or("table");
 
     if json_output {
         let response = serde_json::json!({

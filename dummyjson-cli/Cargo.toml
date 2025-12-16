@@ -3,7 +3,7 @@ name = "dummyjson-cli"
 version = "0.1.0"
 edition = "2021"
 description = "A dummyjson.com mock AIP server CLI tool built with rclib"
-license = "Apache 2.0"
+license = "Apache-2.0"
 
 [[bin]]
 name = "dummyjson-cli"
