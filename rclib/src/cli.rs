@@ -15,6 +15,22 @@ struct TreeNode {
     about: Option<String>,
 }
 
+/// FIXME: Memory leak for 'static lifetime requirement
+/// 
+/// Clap's builder API requires `'static` strings for `Command::new()`, `Arg::new()`, 
+/// `.long()`, `.about()`, and `.default_value()`. This is a hard requirement in clap's
+/// type signatures - the compiler error is: "argument requires that 'a must outlive 'static".
+/// 
+/// Since our CLI is built dynamically from runtime YAML parsing, the command/arg names
+/// and descriptions are owned `String`s that only live during `build_cli()` execution.
+/// We must leak them to satisfy clap's `'static` requirement.
+/// 
+/// Why this is acceptable:
+/// 1. CLI building happens once at program startup
+/// 2. The leaked memory is small (~10KB for typical command structures)
+/// 3. CLI programs are short-lived and exit shortly after argument parsing
+/// 4. Alternative approaches (leaking entire `MappingRoot`, using thread-local storage)
+///    would leak similar amounts of memory with added complexity
 fn leak_str<S: Into<String>>(s: S) -> &'static str {
     Box::leak(s.into().into_boxed_str())
 }
