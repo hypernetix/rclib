@@ -3,14 +3,13 @@ name = "rclib"
 version = "0.1.0"
 edition = "2021"
 description = "A CLI builder library for Rust"
-license = "Apache 2.0"
+license = "Apache-2.0"
 repository = "https://github.com/your-username/rclib"
 
 [dependencies]
 clap = { workspace = true }
 serde = { workspace = true }
 anyhow = { workspace = true }
-http = { workspace = true }
 jsonpath_lib = { workspace = true }
 openapiv3 = { workspace = true }
 regex = { workspace = true }
