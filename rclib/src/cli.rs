@@ -134,8 +134,7 @@ pub fn build_cli(
                                 if !cmd.pattern.is_empty() {
                                     cmd.pattern
                                         .split_whitespace()
-                                        .filter(|t| !is_placeholder(t))
-                                        .next_back()
+                                        .rfind(|t| !is_placeholder(t))
                                         .unwrap_or("")
                                         .to_string()
                                 } else {
